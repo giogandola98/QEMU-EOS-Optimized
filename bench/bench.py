@@ -67,6 +67,10 @@ class Monitor:
         self.s.sendall(line.encode() + b"\n")
         return self._until_prompt()
 
+    def quit(self):
+        """`quit` closes the monitor before any prompt comes back."""
+        self.s.sendall(b"quit\n")
+
     def close(self):
         try:
             self.s.close()
@@ -90,11 +94,15 @@ class Screen:
         self.timeline = []      # (t, hash) at every change
         self.last = None
         self.frames = 0
+        self.latency = []
 
     def grab(self):
         """Current frame: (time since start, sha256 of pixels, is_black, w, h, pixels)."""
+        ts = time.time()
         self.mon.cmd("screendump " + self.ppm)
         t = time.time() - self.t0
+        # A monitor command needs the big QEMU lock: its latency shows how much the vCPU hogs it.
+        self.latency.append(time.time() - ts)
         w, h, px = read_ppm(self.ppm)
         hsh = hashlib.sha256(px).hexdigest()[:16]
         self.frames += 1
@@ -291,6 +299,7 @@ def main():
             raise RuntimeError("GUI not reached in %.0f s" % a.gui_timeout)
         t_gui, h_gui, w, h, px = got
         res["boot_to_gui_s"] = round(t_gui, 2)
+        res["gui_confirmed_s"] = round(time.time() - t0, 2)
         res["frames"]["gui"] = h_gui
         save_png(os.path.join(out, "gui.png"), w, h, px)
 
@@ -328,7 +337,7 @@ def main():
                 res["errors"].append("savevm: " + r.strip()[:300])
         res["host_cpu_user_s"], res["host_cpu_sys_s"], res["peak_rss_mib"] = proc_stats(q.pid)
         res["wall_s"] = round(time.time() - t0, 2)
-        mon.cmd("quit")
+        mon.quit()
         q.wait(timeout=30)
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:
         res["errors"].append(str(e))
@@ -346,6 +355,9 @@ def main():
             shutil.rmtree(tmp, ignore_errors=True)
 
     res["screen_polls"] = scr.frames if mon else 0
+    if mon and scr.latency:
+        lat = sorted(scr.latency)
+        res["screendump_ms"] = {"median": round(lat[len(lat) // 2] * 1000, 1), "max": round(lat[-1] * 1000, 1)}
     res["timeline"] = scr.timeline if mon else []
     recs = plugin_records(wj)
     ivl = [r for r in recs if r.get("type") == "interval"]
