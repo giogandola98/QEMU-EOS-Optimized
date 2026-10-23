@@ -234,6 +234,7 @@ def main():
     ap.add_argument("--stable", type=float, default=3.0, help="s unchanged = settled (boot)")
     ap.add_argument("--key-stable", type=float, default=1.0, help="s unchanged = settled (scenarios)")
     ap.add_argument("--gui-timeout", type=float, default=120.0)
+    ap.add_argument("--count", action="append", default=[], help="count lines of qemu.log containing this text")
     a = ap.parse_args()
 
     cam = CAMS[a.cam]
@@ -376,6 +377,8 @@ def main():
     if a.debugmsg:
         res["log_markers"] = {m: (m in text) for m in cam["log_markers"]}
     res["log_bytes"] = len(text)
+    if a.count:
+        res["log_counts"] = {c: sum(1 for l in text.splitlines() if c in l) for c in a.count}
     res["qemu_errors"] = [l for l in text.splitlines() if "Assertion" in l or "qemu-system-arm:" in l][-5:]
 
     for name, want in expect.items():
