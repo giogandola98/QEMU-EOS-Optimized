@@ -20,7 +20,6 @@
 #include "hw/arm/armv7m.h"
 #include "hw/eos/eos.h"
 #include "hw/eos/dbi/logging.h"
-#include "hw/eos/dbi/backtrace.h"
 
 #include "hw/eos/model_list.h"
 #include "hw/eos/eos_ml_helpers.h"
@@ -2543,10 +2542,18 @@ static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int 
                 value, CURRENT_CPU->env.regs[15]);
     }
     if (trace && idx == 0 && (type & MODE_WRITE)) {
-        /* ClockSaver client mask: who changes it (stack walk), to find the client keeping LCLK on */
-        char bt[512] = "";
-        eos_backtrace_rebuild(bt, sizeof(bt));
-        fprintf(stderr, "[PM1100D] LCLK mask <- 0x%X from %s\n", value, bt);
+        /* ClockSaver client mask: who changes it (return addresses on the stack), to find the client
+         * keeping LCLK on */
+        uint32_t sp = CURRENT_CPU->env.regs[13], w[40];
+        cpu_physical_memory_read(sp, w, sizeof(w));
+        fprintf(stderr, "[PM1100D] LCLK mask <- 0x%X lr %08X, ROM words on stack:", value,
+                CURRENT_CPU->env.regs[14]);
+        for (int i = 0; i < 40; i++) {
+            if (w[i] >= 0xFF000000) {
+                fprintf(stderr, " %08X", w[i]);
+            }
+        }
+        fprintf(stderr, "\n");
     }
     if (trace && trace_count[idx]++ < 40) {
         fprintf(stderr, "[PM1100D] %s 0x%08X %s 0x%X (pc %08X)\n", (type & MODE_WRITE) ? "W" : "R",
