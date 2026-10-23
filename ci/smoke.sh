@@ -11,9 +11,9 @@ CAM=${2:-1100D}
 case "$CAM" in
     1100D) FW=105; OUT=emu-out/smoke
            # deep sleep (PM model): display off -> selfRefresh In/Out -> INFO wakes the shooting screen
-           EXTRA='--debugmsg --min-count "pmSelfRefresh : In=1" --min-count "pmSelfRefresh : Out=1"
-                  --step key:i --step wait:3 --step shot:display_off --step wait:15 --step key:i --step wait:4
-                  --step shot:woken' ;;
+           EXTRA='--debugmsg --min-count "pmSelfRefresh : In=1" --min-count "pmSelfRefresh : Out=1"'
+           EXTRA+=' --step key:i --step wait:3 --step shot:display_off --step wait:15 --step key:i --step wait:4'
+           EXTRA+=' --step shot:woken' ;;   # one line: EXTRA is eval-ed, a newline would end the command
     4000D) FW=110; OUT=emu-out/smoke-4000D; EXTRA= ;;
     *) echo "unknown CAM $CAM" >&2; exit 1 ;;
 esac
