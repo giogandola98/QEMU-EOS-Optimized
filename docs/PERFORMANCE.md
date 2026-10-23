@@ -40,11 +40,14 @@ average was ~8 on 4 CPUs, so single wall-clock numbers swing ±30 %. Compare med
 | (d) | `-icount` | — | not used | — | stays off (guest time = host time) |
 | (d) | MMIO handler lookup cache (new, `hw/eos/eos.c`) | 1100D idle MIPS | 42.3 | 44.5 | **+5 %**; same frames, same IRQ/s. `QEMU_EOS_MMIO_CACHE=0` restores the scan |
 | (d) | 250 µs `usleep` per triggered interrupt → 0 (`QEMU_EOS_INT_SLEEP_US`, experiment) | boot→GUI s / boot insns | 1.55 / 29.4 M | 1.84 / 73.5 M | same frames, but the guest executes 2.5× more instructions while booting (timing changes) and is not faster: **default kept at 250 µs** |
-| (e) | two 1100D runs in parallel instead of in sequence | wall time of the pair | 21.4 s | 11.0 s | **−48 %**; same frames, idle MIPS −5 %, IRQ/s within noise. Used by ML-Optimized's `run_cam.sh` (`PARALLEL=1`) |
+| (e) | two 1100D runs in parallel instead of in sequence | wall time of the pair | 21.4 s | 11.0 s | **−48 %**; same frames, idle MIPS −5 %, IRQ/s within noise. Available in ML-Optimized's `run_cam.sh` as `PARALLEL=1`, off by default (see below) |
 | — | all variants | distinct frame sets in 52 runs | — | 1 | behaviour identical across every change |
 
-ML-Optimized `emulation` job: QEMU image now pulled (1 s) instead of built (~12 min whenever its Containerfile
-changed); scenarios step 181 s → 128 s with parallel scenarios.
+ML-Optimized `emulation` job: QEMU image now pulled (1-13 s) instead of built (~12 min whenever its Containerfile
+changed). With `PARALLEL=1` its scenarios step went 181 s → 128 s, but in that mode the wakeups plugin's window
+started ~11.7 s late in both CI runs (QEMU loaded its plugins that long after `scenario.py` started it; recorded as
+`plugin_clock_lag_s`), so the 30 s window shrank to 18-22 s. The bench's own parallel runs do not show this; until
+it is understood ML keeps sequential scenarios.
 
 ### Runner speed
 
