@@ -18,7 +18,7 @@ target camera: EOS M (fw 2.0.2).
 |---|---|---|
 | 0 | **done** | `.forgejo/workflows/ci.yml`: image from this repo's source (`ci/qemu/Containerfile` + `Containerfile.tools`), plugin self-test, 1100D smoke test (boot to GUI + menu scenarios, pixel hashes in `bench/expected.json`), push to `<forgejo-server>/<private-org>/qemu-eos:<sha>` (`:main` on main). ML-Optimized pulls it by digest (`ci/qemu-image.txt` there). Secrets: `ROM_TOKEN` (read:package), `REGISTRY_TOKEN` (write:package) |
 | 1 | **done** | `bench/baseline.json` (bench run 7): boot→GUI ~1.5-2 s / ~29 M guest insns, menu scenarios 0.1-0.3 s each, idle ~42 MIPS, ~87 MiB RSS |
-| 2 | **done** | `docs/PERFORMANCE.md`: LTO `opt` build (+7 % MIPS, build −57 %), MMIO handler cache (+5 % idle MIPS), plugin v2 (inline counters; overhead below noise, as was v1), parallel runs (−48 % wall; opt-in in ML, see PERFORMANCE.md). Snapshots blocked: no VMState in `hw/eos` (documented). Frames identical in all 52 runs |
+| 2 | **done** | `docs/PERFORMANCE.md`: LTO `opt` build (+7 % MIPS, build −57 %), MMIO handler cache (+5 % idle MIPS), plugin v2 (inline counters; overhead below noise, as was v1), parallel runs (−48 % wall, used by ML's run_cam.sh). Snapshots blocked: no VMState in `hw/eos` (documented). Frames identical in all 52 runs |
 | 3 | partly | plugin side done in phase 2 (translation-time inline counters); DryOS task-switch trace still `-d tasks` |
 
 ## MCP server (phase 4)

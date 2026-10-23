@@ -40,14 +40,17 @@ average was ~8 on 4 CPUs, so single wall-clock numbers swing ±30 %. Compare med
 | (d) | `-icount` | — | not used | — | stays off (guest time = host time) |
 | (d) | MMIO handler lookup cache (new, `hw/eos/eos.c`) | 1100D idle MIPS | 42.3 | 44.5 | **+5 %**; same frames, same IRQ/s. `QEMU_EOS_MMIO_CACHE=0` restores the scan |
 | (d) | 250 µs `usleep` per triggered interrupt → 0 (`QEMU_EOS_INT_SLEEP_US`, experiment) | boot→GUI s / boot insns | 1.55 / 29.4 M | 1.84 / 73.5 M | same frames, but the guest executes 2.5× more instructions while booting (timing changes) and is not faster: **default kept at 250 µs** |
-| (e) | two 1100D runs in parallel instead of in sequence | wall time of the pair | 21.4 s | 11.0 s | **−48 %**; same frames, idle MIPS −5 %, IRQ/s within noise. Available in ML-Optimized's `run_cam.sh` as `PARALLEL=1`, off by default (see below) |
+| (e) | two 1100D runs in parallel instead of in sequence | wall time of the pair | 21.4 s | 11.0 s | **−48 %**; same frames, idle MIPS −5 %, IRQ/s within noise. Used by ML-Optimized's `run_cam.sh` (`PARALLEL=1`, default; see below) |
 | — | all variants | distinct frame sets in 52 runs | — | 1 | behaviour identical across every change |
 
 ML-Optimized `emulation` job: QEMU image now pulled (1-13 s) instead of built (~12 min whenever its Containerfile
-changed). With `PARALLEL=1` its scenarios step went 181 s → 128 s, but in that mode the wakeups plugin's window
-started ~11.7 s late in both CI runs (QEMU loaded its plugins that long after `scenario.py` started it; recorded as
-`plugin_clock_lag_s`), so the 30 s window shrank to 18-22 s. The bench's own parallel runs do not show this; until
-it is understood ML keeps sequential scenarios.
+changed). Its scenarios now run in parallel (`PARALLEL=1`, default); the first parallel runs showed 18-22 s windows
+instead of 30 s. Cause: the plugin times its window from its own load, and a cold start of the freshly pulled
+binary on the busy runner took up to ~12 s (sequential runs were hit too, 20-27 s windows). `scenario.py` now
+starts its timeline when the monitor socket appears, which QEMU creates right after loading plugins: run 41 has
+30.3 / 33.5 s windows, `plugin_clock_lag_s` −0.09 s, `qemu_start_s` 3.8 s, and the same screenshots as before
+the migration. Scenario step: 181-213 s sequential (runs 30, 40) vs 188 s parallel (run 41) on this runner,
+where load varies a lot between runs.
 
 ### Runner speed
 
