@@ -85,9 +85,9 @@ def main():
                    "-kernel", out + "/busyloop.elf"]
             if plugin:
                 cmd += ["-plugin", plugin]
-            t = time.time()
+            t = time.monotonic()
             r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=300)
-            wall = time.time() - t
+            wall = time.monotonic() - t
             if r.returncode != 0:
                 sys.exit("%s failed: %s" % (name, r.stderr.decode(errors="replace")[-500:]))
             results.append((name, wall))

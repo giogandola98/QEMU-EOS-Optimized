@@ -98,11 +98,11 @@ class Screen:
 
     def grab(self):
         """Current frame: (time since start, sha256 of pixels, is_black, w, h, pixels)."""
-        ts = time.time()
+        ts = time.monotonic()
         self.mon.cmd("screendump " + self.ppm)
-        t = time.time() - self.t0
+        t = time.monotonic() - self.t0
         # A monitor command needs the big QEMU lock: its latency shows how much the vCPU hogs it.
-        self.latency.append(time.time() - ts)
+        self.latency.append(time.monotonic() - ts)
         w, h, px = read_ppm(self.ppm)
         hsh = hashlib.sha256(px).hexdigest()[:16]
         self.frames += 1
@@ -114,9 +114,9 @@ class Screen:
     def wait_settled(self, poll, stable, timeout, want=None, changed_from=None):
         """Wait until the frame is `want` (if given), or differs from `changed_from` (if given) and
         then stays the same for `stable` s. Returns (t_first_seen, hash, w, h, pixels) or None."""
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         cand = None             # (t_first_seen, hash, w, h, px)
-        while time.time() < deadline:
+        while time.monotonic() < deadline:
             t, hsh, black, w, h, px = self.grab()
             if want is not None:
                 if hsh == want:
@@ -282,13 +282,13 @@ def main():
 
     res = {"label": a.label, "cam": a.cam, "cmd": cmd[1:], "env": a.env, "disk_format": fmt,
            "loadvm": a.loadvm or None, "scenarios": {}, "frames": {}, "errors": []}
-    t0 = time.time()
+    t0 = time.monotonic()
     with open(log, "wb") as logf:
         q = subprocess.Popen(cmd, env=env, stdin=subprocess.DEVNULL, stdout=logf, stderr=subprocess.STDOUT)
     mon = None
     try:
         while not os.path.exists(mon_path):
-            if q.poll() is not None or time.time() - t0 > 30:
+            if q.poll() is not None or time.monotonic() - t0 > 30:
                 raise RuntimeError("QEMU did not start (code %s, see qemu.log)" % q.poll())
             time.sleep(0.02)
         mon = Monitor(mon_path)
@@ -299,14 +299,14 @@ def main():
             raise RuntimeError("GUI not reached in %.0f s" % a.gui_timeout)
         t_gui, h_gui, w, h, px = got
         res["boot_to_gui_s"] = round(t_gui, 2)
-        res["gui_confirmed_s"] = round(time.time() - t0, 2)
+        res["gui_confirmed_s"] = round(time.monotonic() - t0, 2)
         res["frames"]["gui"] = h_gui
         save_png(os.path.join(out, "gui.png"), w, h, px)
 
         prev = h_gui
         if not a.no_scenarios:
             for name, keys in cam["scenarios"]:
-                tk = time.time() - t0
+                tk = time.monotonic() - t0
                 for k in keys:
                     mon.cmd("sendkey " + k)
                 got = scr.wait_settled(a.poll, a.key_stable, 30, want=expect.get(name), changed_from=prev)
@@ -319,9 +319,9 @@ def main():
                 save_png(os.path.join(out, name + ".png"), w, h, px)
                 prev = hs
 
-        t_idle0 = time.time() - t0
+        t_idle0 = time.monotonic() - t0
         time.sleep(a.idle)
-        t_idle1 = time.time() - t0
+        t_idle1 = time.monotonic() - t0
         res["idle_window_s"] = [round(t_idle0, 2), round(t_idle1, 2)]
         jit = mon.cmd("info jit")
         m = re.search(r"TB flush count\s+(\d+)", jit)
@@ -330,13 +330,13 @@ def main():
         if m:
             res["tb_code_bytes"] = [int(m.group(1)), int(m.group(2))]
         if a.savevm:
-            ts = time.time()
+            ts = time.monotonic()
             r = mon.cmd("savevm " + a.savevm)
-            res["savevm_s"] = round(time.time() - ts, 2)
+            res["savevm_s"] = round(time.monotonic() - ts, 2)
             if r.strip():
                 res["errors"].append("savevm: " + r.strip()[:300])
         res["host_cpu_user_s"], res["host_cpu_sys_s"], res["peak_rss_mib"] = proc_stats(q.pid)
-        res["wall_s"] = round(time.time() - t0, 2)
+        res["wall_s"] = round(time.monotonic() - t0, 2)
         mon.quit()
         q.wait(timeout=30)
     except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as e:

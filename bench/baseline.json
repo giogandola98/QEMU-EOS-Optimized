@@ -1,0 +1,115 @@
+{
+ "what": "Phase-1 baseline: qemu-eos 4.2.1 as ML-Optimized used it (QEMU_PROFILE=baseline, plugin v1, original MMIO handler scan), 1100D fw 1.0.5, Canon firmware only (no ML), medians of interleaved repetitions.",
+ "source": "QEMU-EOS-Optimized bench workflow run 7 (<forgejo-server>/root/QEMU-EOS-Optimized/actions/runs/7), commit 5dda6f5315",
+ "runner": {
+  "cpus": 4,
+  "ram_mib": 4000,
+  "host_loop_ns": 1.958,
+  "note": "shared host executor, load average ~8 during the run: wall-clock numbers are noisy (+-30% on boot)"
+ },
+ "metrics": {
+  "boot_to_gui_s": "wall time from QEMU start to the first frame of the Canon shooting screen (pixel hash)",
+  "boot_insns": "guest instructions executed until then (wakeups plugin, 100 ms intervals, interpolated)",
+  "scenario_s": "key press to settled screen, 0.1 s screen polling: menu (M), menu_right (Right), menu_close (M)",
+  "idle_mips": "guest MIPS over an 8 s idle window (Canon idle spins at 0xFF1EA818, so this is emulation speed)",
+  "host_cpu_s": "user+sys CPU seconds of the QEMU process for the whole run",
+  "peak_rss_mib": "VmHWM of the QEMU process"
+ },
+ "scenarios": {
+  "ml-ci-logging": {
+   "runs": 5,
+   "boot_to_gui_s": 1.66,
+   "boot_insns": 29400849,
+   "scenario_s": {
+    "menu": 0.11,
+    "menu_right": 0.21,
+    "menu_close": 0.21
+   },
+   "scenarios_total_s": 0.55,
+   "idle_mips": 39.28,
+   "idle_irq_per_s": 98.2,
+   "idle_wfi_per_s": 0.65,
+   "host_cpu_s": 21.14,
+   "peak_rss_mib": 84.1,
+   "screendump_ms": 2.9,
+   "tb_flushes": 0,
+   "log_bytes": 1043266,
+   "frames": [
+    "{\"gui\": \"ec5fadaf8f184f97\", \"menu\": \"56f95f347cdf8c41\", \"menu_close\": \"ec5fadaf8f184f97\", \"menu_right\": \"26e340a716cb3595\"}"
+   ],
+   "args": "plugin v1 + -d debugmsg,tasks (ML-Optimized CI)"
+  },
+  "plain": {
+   "runs": 5,
+   "boot_to_gui_s": 1.96,
+   "boot_insns": 28664221,
+   "scenario_s": {
+    "menu": 0.11,
+    "menu_right": 0.21,
+    "menu_close": 0.22
+   },
+   "scenarios_total_s": 0.65,
+   "idle_mips": 42.03,
+   "idle_irq_per_s": 99.8,
+   "idle_wfi_per_s": 1.6,
+   "host_cpu_s": 14.52,
+   "peak_rss_mib": 87.4,
+   "screendump_ms": 3.1,
+   "tb_flushes": 0,
+   "log_bytes": 12878,
+   "frames": [
+    "{\"gui\": \"ec5fadaf8f184f97\", \"menu\": \"56f95f347cdf8c41\", \"menu_close\": \"ec5fadaf8f184f97\", \"menu_right\": \"26e340a716cb3595\"}"
+   ],
+   "args": "plugin v1, no -d"
+  }
+ },
+ "microbench": {
+  "busyloop_insns": 600000000,
+  "baseline_build": [
+   {
+    "config": "none",
+    "wall_s": 15.232,
+    "min_s": 14.184,
+    "mips": 39.4,
+    "overhead_pct": 0.0
+   },
+   {
+    "config": "v1 (per-insn callbacks)",
+    "wall_s": 14.917,
+    "min_s": 14.421,
+    "mips": 40.2,
+    "overhead_pct": -2.1
+   },
+   {
+    "config": "v2 (inline)",
+    "wall_s": 15.735,
+    "min_s": 13.719,
+    "mips": 38.1,
+    "overhead_pct": 3.3
+   },
+   {
+    "config": "v2 insns=off",
+    "wall_s": 16.195,
+    "min_s": 13.816,
+    "mips": 37.0,
+    "overhead_pct": 6.3
+   },
+   {
+    "config": "v2 burst=on",
+    "wall_s": 15.316,
+    "min_s": 13.879,
+    "mips": 39.2,
+    "overhead_pct": 0.6
+   }
+  ],
+  "debian_qemu_7.2_reference": [
+   {
+    "config": "none",
+    "wall_s": 16.71,
+    "min_s": 14.546,
+    "mips": 35.9,
+    "overhead_pct": 0.0
+   }
+  ]
+ }
+}
