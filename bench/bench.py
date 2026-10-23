@@ -41,6 +41,12 @@ CAMS = {
         "uart_markers": ["K288 READY", "[MC] PROP_GUI_STATE 0"],
         "log_markers": ["GUI_Initialize", "DlgShootOlc.c LOCAL_DIALOG_REFRESH"],
     },
+    "4000D": {
+        "debugmsg": "0xFE117178",          # DryosDebugMsg, docs/models/4000D.md (ROM pattern search)
+        "scenarios": [("menu", ["m"]), ("menu_right", ["right"]), ("menu_close", ["m"])],
+        "uart_markers": ["K422 READY", "[MC] PROP_GUI_STATE 0", "[STARTUP] startupInitializeComplete"],
+        "log_markers": ["GUI_Initialize", "DlgShootOlc.c LOCAL_DIALOG_REFRESH"],
+    },
 }
 
 

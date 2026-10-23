@@ -18,6 +18,7 @@
 #define MODEL_NAME_1100D "1100D"
 #define MODEL_NAME_1200D "1200D"
 #define MODEL_NAME_1300D "1300D"
+#define MODEL_NAME_4000D "4000D"
 #define MODEL_NAME_A1100 "A1100"
 #define MODEL_NAME_5D3 "5D3"
 #define MODEL_NAME_5D3eeko "5D3eeko"
@@ -121,11 +122,12 @@ struct eos_model_desc {
             uint32_t imgpowdet_register_bit;
             uint32_t imgpowdet_interrupt;
             uint32_t max_cpus;
+            uint32_t rom1_hivecs_offset; /* ROM1 offset of the 64K boot block seen at 0xFFFF0000 */
         };
         
         /* this must match the number of items in the above struct */
         /* note: you get a compile-time error if params[] is smaller than the struct */
-        uint32_t params[50 + ram_extra_array_len * 2];
+        uint32_t params[51 + ram_extra_array_len * 2];
     };
 } __attribute__((packed));
 
