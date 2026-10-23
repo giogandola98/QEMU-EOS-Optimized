@@ -241,6 +241,12 @@ def main():
     ap.add_argument("--key-stable", type=float, default=1.0, help="s unchanged = settled (scenarios)")
     ap.add_argument("--gui-timeout", type=float, default=120.0)
     ap.add_argument("--count", action="append", default=[], help="count lines of qemu.log containing this text")
+    ap.add_argument("--min-count", action="append", default=[],
+                    help="TEXT=N: error unless qemu.log has at least N lines containing TEXT")
+    ap.add_argument("--step", action="append", default=[],
+                    help="after the idle window, in order: key:K (sendkey K), wait:S, shot:NAME (frame hash + "
+                         "PNG), mon:CMD (monitor command, output kept); --count texts are also counted per "
+                         "segment between steps")
     a = ap.parse_args()
 
     cam = CAMS[a.cam]
@@ -330,6 +336,24 @@ def main():
         time.sleep(a.idle)
         t_idle1 = time.monotonic() - t0
         res["idle_window_s"] = [round(t_idle0, 2), round(t_idle1, 2)]
+        # Scripted steps (e.g. display off, sleep, key to wake): log offsets mark the segments
+        steps = []
+        for st in a.step:
+            kind, _, arg = st.partition(":")
+            if kind == "key":
+                mon.cmd("sendkey " + arg)
+            elif kind == "wait":
+                time.sleep(float(arg))
+            elif kind == "mon":         # e.g. mon:xp /8wx 0x2b60 (guest state, kept in result.json)
+                res.setdefault("monitor", []).append([arg, mon.cmd(arg).strip()])
+            elif kind == "shot":
+                _, hs, _, w, h, px = scr.grab()
+                res["frames"][arg] = hs
+                save_png(os.path.join(out, arg + ".png"), w, h, px)
+            else:
+                raise RuntimeError("bad --step " + st)
+            steps.append({"step": st, "t": round(time.monotonic() - t0, 2), "log": os.path.getsize(log)})
+        res["steps"] = steps
         jit = mon.cmd("info jit")
         m = re.search(r"TB flush count\s+(\d+)", jit)
         res["tb_flushes"] = int(m.group(1)) if m else None
@@ -385,10 +409,26 @@ def main():
     res["log_bytes"] = len(text)
     if a.count:
         res["log_counts"] = {c: sum(1 for l in text.splitlines() if c in l) for c in a.count}
+    if a.count and res.get("steps"):
+        raw = open(log, "rb").read()
+        prev = 0
+        for st in res["steps"]:
+            seg = raw[prev:st["log"]].decode(errors="replace").splitlines()
+            st["counts"] = {c: sum(1 for l in seg if c in l) for c in a.count}
+            prev = st["log"]
+    for spec in a.min_count:
+        txt, n = spec.rsplit("=", 1)
+        got = sum(1 for l in text.splitlines() if txt in l)
+        res.setdefault("min_counts", {})[txt] = got
+        if got < int(n):
+            res["errors"].append("log: %d lines with %r, expected >= %s" % (got, txt, n))
     res["qemu_errors"] = [l for l in text.splitlines() if "Assertion" in l or "qemu-system-arm:" in l][-5:]
 
+    # Frames this run tries to capture: the GUI, the scenarios (unless skipped) and the step shots
+    wanted = {"gui"} | (set() if a.no_scenarios else {n for n, _ in cam["scenarios"]}) | \
+        {st.split(":", 1)[1] for st in a.step if st.startswith("shot:")}
     for name, want in expect.items():
-        if res["frames"].get(name) != want:
+        if name in wanted and res["frames"].get(name) != want:
             res["errors"].append("frame %s: got %s, expected %s" % (name, res["frames"].get(name), want))
     for m, ok in res["uart_markers"].items():
         if not ok:
@@ -397,7 +437,7 @@ def main():
     with open(os.path.join(out, "result.json"), "w") as f:
         json.dump(res, f, indent=1)
     short = {k: res.get(k) for k in ("label", "boot_to_gui_s", "boot_insns", "scenarios", "idle",
-                                      "host_cpu_user_s", "peak_rss_mib", "tb_flushes", "savevm_s", "errors")}
+                                      "host_cpu_user_s", "peak_rss_mib", "tb_flushes", "savevm_s", "steps", "errors")}
     print(json.dumps(short), flush=True)
     sys.exit(1 if res["errors"] else 0)
 

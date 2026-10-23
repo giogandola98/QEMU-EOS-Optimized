@@ -1210,9 +1210,13 @@ unsigned int eos_handle_jpcore(unsigned int parm, unsigned int address, unsigned
 
                 if (strcmp(eos_state->model->name, "1300D") == 0
                     || strcmp(eos_state->model->name, "4000D") == 0
-                    || strcmp(eos_state->model->name, "A1100") == 0)
+                    || strcmp(eos_state->model->name, "A1100") == 0
+                    || strcmp(eos_state->model->name, "1100D") == 0)
                 {
-                    /* 1300D, A1100 requires it (A1100 avoids HardwareDefect in ffcbb5bc)  */
+                    /* 1300D, A1100 requires it (A1100 avoids HardwareDefect in ffcbb5bc).
+                     * 1100D: JpCore init (0xFF1D515C) waits for bit 24 after the reset; without it
+                     * the init fails ("JPEGICError") and leaks its image-engine clock client
+                     * (ClockSaver slot 3), so LCLK never turns off and the deep sleep is unreachable. */
                     ret = 0x1010000;
                 }
             }
