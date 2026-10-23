@@ -27,3 +27,16 @@ Tools:
 
 Safety: ROMs fetched from `<private-org>` at boot, kept in a temp dir, never returned through the API (memory reads are
 capped and not allowed to dump whole ROM regions).
+
+## LiveView simulation (phase 5)
+No camera/video source in CI, so frames come from samples.
+- **A — frame injection (first):** a small QEMU device writes a frame into the LV YUV422 buffer at a fixed virtual-time
+  rate and raises the vsync/frame event ML listens to. Exercises ML overlays (peaking, zebras, histogram, magic zoom)
+  end to end with screenshot comparisons, and lets us measure overlay cost on static vs moving scenes. Bypasses
+  Canon's LV state machine.
+- **B — Canon pipeline (research):** emulate enough of sensor timers / EDMAC / display path for Canon's own LiveView to
+  run on injected frames. Needs ROM RE; effort unknown. Valuable for EOS M power behaviour (always in LV).
+- **Frame sources:** (1) deterministic synthetic patterns (focus sweep, exposure ramps with clipping, static vs moving);
+  (2) real LV buffers from the user's camera via ML Debug → "Dump image buffers" (private, like ROMs);
+  (3) a few permissively licensed test images converted to UYVY.
+
