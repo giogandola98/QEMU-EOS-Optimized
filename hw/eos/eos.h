@@ -331,6 +331,8 @@ typedef struct EOSState
     struct HPTimer HPTimers[16];
     uint32_t clock_enable;
     uint32_t clock_enable_6;
+    /* 1100D selfRefresh (eos_pm_1100d): all module clocks gated, DIGIC timers stopped until a wake */
+    int clocks_gated;
     uint32_t flash_state_machine;
     DispState disp;
     RTCState rtc;
