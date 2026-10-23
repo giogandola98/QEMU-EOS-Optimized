@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build (or reuse) the qemu-eos image of this checkout on the CI host. Prints the image name on stdout.
 #
-# Usage: ci/build-image.sh [PROFILE]     PROFILE = QEMU_PROFILE of ci/qemu/Containerfile (default: baseline)
+# Usage: ci/build-image.sh [PROFILE]     PROFILE = QEMU_PROFILE of ci/qemu/Containerfile (default: opt)
 #
 # Two layers, both content-addressed so podman skips work that is already done:
 #   qemu-eos-base:<profile>-<hash>   QEMU itself (~10 min); hash over the QEMU sources (git index of
@@ -10,7 +10,7 @@
 # --network=host only for these builds: they need apt, and pasta networking fails on this runner.
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-PROFILE=${1:-baseline}
+PROFILE=${1:-opt}
 cd "$ROOT"
 
 src_hash() {

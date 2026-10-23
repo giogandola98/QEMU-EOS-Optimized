@@ -1,7 +1,6 @@
 /*
- * wakeups: QEMU TCG plugin (QEMU 4.2 plugin API, qemu-eos v4.2.1) that measures how often an
- * ARMv5 guest leaves idle. It needs no ROM-specific address, so it works for any DryOS camera
- * and for the bare-metal self-test.
+ * wakeups: QEMU TCG plugin (QEMU 4.2 plugin API) that measures how often an ARMv5 guest leaves idle.
+ * It needs no ROM-specific address, so it works for any DryOS camera and for the bare-metal self-test.
  *
  * Counted:
  *   wfi    executions of a wait-for-interrupt: `mcr p15,0,Rd,c7,c0,4` (ARM926/946, the DryOS idle loop),
@@ -10,28 +9,35 @@
  *   irq    executions of the IRQ vector (0x18 or high vector 0xFFFF0018) = IRQ exception entries.
  *   fiq    same for the FIQ vector (0x1C / 0xFFFF001C).
  *   insns  guest instructions (counted per executed translation block, so exact unless a block is
- *          left early by a synchronous exception).
+ *          left early by a synchronous exception). insns=off drops this counter.
  *   halts  times the vCPU really slept (a WFI with an interrupt already pending returns at once),
  *          and the host time spent halted.
  *
- * Derived: insns between consecutive WFIs (the work done per wakeup: mean and max) and a busy ratio.
- * With real-time QEMU (no -icount) busy_ratio = 1 - halted/elapsed host time; TCG is slower than the
- * real CPU, so this over-estimates busy time. With icount_shift=N (same N as `-icount shift=N`)
- * busy time is insns * 2^N ns over the elapsed time instead, independent of the host speed.
- * Note: -icount forces single-threaded TCG, where QEMU 4.2 calls no idle/resume plugin callbacks,
- * so halts/halted_ms stay 0 in that mode.
+ * Cost: everything on the guest's hot path is inline TCG code emitted at translation time (one add per
+ * executed TB for insns, one add on each WFI / vector instruction). There are no per-instruction helper
+ * calls, so the plugin adds no call/return or register spills to translated code. halts come from the
+ * vCPU idle/resume hooks (once per real sleep). The measurement window and the interval records are cut
+ * by a sampler thread on host time, independent of guest events.
+ * burst=on adds one callback on WFI instructions only, to track the longest run of instructions between
+ * two WFIs (max_insns_between_wfi; null when off). A WFI ends in a halt anyway, so this is cheap.
+ *
+ * Derived: insns between WFIs (mean; max with burst=on) and a busy ratio. With real-time QEMU (no -icount)
+ * busy_ratio = 1 - halted/elapsed host time; TCG is slower than the real CPU, so this over-estimates
+ * busy time. With icount_shift=N (same N as `-icount shift=N`) busy time is insns * 2^N ns over the
+ * elapsed time instead, independent of the host speed. -icount forces single-threaded TCG, where QEMU 4.2
+ * calls no idle/resume plugin callbacks, so halts/halted_ms stay 0 in that mode.
  *
  * Options (-plugin libwakeups.so,arg=KEY=VALUE,...):
  *   out=PATH          JSON lines output (default: stderr)
- *   start_ms=N        measurement window starts N ms (host time) after QEMU start; earlier events
+ *   start_ms=N        measurement window starts N ms (host time) after plugin load; earlier events
  *                     (boot) are not in the summary (default 0)
  *   interval_ms=N     also emit one "interval" record every N ms (default 0: summary only)
  *   icount_shift=N    see busy ratio above (default: unset)
- *
- * Records are written at the first plugin event after each deadline (WFI, IRQ, idle/resume), so a
- * guest that never idles and never takes interrupts only gets the final "summary" record at exit.
+ *   insns=on|off      count guest instructions (default on)
+ *   burst=on|off      track max_insns_between_wfi (default off)
  */
 #include <inttypes.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,22 +50,29 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
 struct counters {
     uint64_t wfi, irq, fiq, insns, halts, halted_ns;
-    uint64_t max_insns_between_wfi;
 };
 
-/* One vCPU on every machine we use (EOS cameras emulate the main ARM core only), and plugin
- * callbacks run on that vCPU thread, so plain globals need no locking. */
-static struct counters now;     /* cumulative since start */
-static struct counters win;     /* snapshot at the summary window start */
-static struct counters ivl;     /* snapshot at the current interval start */
-static uint64_t insns_at_last_wfi;
+/* Written by the (single) vCPU thread: by inline TCG adds or in its idle/resume/WFI callbacks.
+ * Read by the sampler thread with relaxed atomic loads: aligned 64-bit loads cannot tear on the
+ * 64-bit hosts we run on, and a sample that is off by one in-flight increment does not matter. */
+static struct counters now;
+static uint64_t halt_start_ns;          /* 0 while running */
+static uint64_t max_burst, insns_at_last_wfi;
 static bool have_wfi;
-static uint64_t halt_start_ns;   /* 0 while running */
 
-static uint64_t t0_ns, start_ns, interval_ns, next_interval_ns, win_t_ns, ivl_t_ns;
-static bool win_started;
+static uint64_t t0_ns, start_ns, interval_ns;
 static int icount_shift = -1;
+static bool count_insns = true, track_burst;
 static FILE *out;
+
+/* Sampler state (sampler thread; the atexit hook after joining it). */
+static struct counters win, ivl;
+static uint64_t win_t_ns, ivl_t_ns;
+static bool win_started;
+static pthread_t sampler;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t wake;
+static bool stopping;
 
 static uint64_t mono_ns(void)
 {
@@ -68,19 +81,36 @@ static uint64_t mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec - t0_ns;
 }
 
-static void emit(const char *type, const struct counters *from, uint64_t t_from, uint64_t t_to)
+#define LOAD(x) __atomic_load_n(&(x), __ATOMIC_RELAXED)
+
+/* Consistent-enough copy of the counters at host time t, including a halt still in progress. */
+static struct counters snapshot(uint64_t t)
+{
+    struct counters c = {
+        .wfi = LOAD(now.wfi), .irq = LOAD(now.irq), .fiq = LOAD(now.fiq), .insns = LOAD(now.insns),
+        .halts = LOAD(now.halts), .halted_ns = LOAD(now.halted_ns),
+    };
+    uint64_t hs = LOAD(halt_start_ns);
+
+    if (hs && t > hs) {
+        c.halted_ns += t - hs;
+    }
+    return c;
+}
+
+static void emit(const char *type, const struct counters *from, uint64_t t_from,
+                 const struct counters *to, uint64_t t_to)
 {
     struct counters d = {
-        .wfi = now.wfi - from->wfi, .irq = now.irq - from->irq, .fiq = now.fiq - from->fiq,
-        .insns = now.insns - from->insns, .halts = now.halts - from->halts,
-        .halted_ns = now.halted_ns - from->halted_ns,
+        .wfi = to->wfi - from->wfi, .irq = to->irq - from->irq, .fiq = to->fiq - from->fiq,
+        .insns = to->insns - from->insns, .halts = to->halts - from->halts,
+        .halted_ns = to->halted_ns - from->halted_ns,
     };
     double s = (t_to - t_from) / 1e9;
     double busy;
+    char maxb[24] = "null";
 
     if (icount_shift >= 0) {
-        /* -icount runs single-threaded TCG, which never reports idle/resume to plugins, so the
-         * halted time is unknown here; with sleep=on the virtual clock tracks host time. */
         double busy_ns = (double)d.insns * (double)(1ull << icount_shift);
         busy = t_to > t_from ? busy_ns / (t_to - t_from) : 0;
         if (busy > 1) {
@@ -89,86 +119,91 @@ static void emit(const char *type, const struct counters *from, uint64_t t_from,
     } else {
         busy = t_to > t_from ? 1.0 - (double)d.halted_ns / (t_to - t_from) : 0;
     }
+    if (track_burst) {
+        snprintf(maxb, sizeof(maxb), "%" PRIu64, LOAD(max_burst));
+    }
     fprintf(out,
             "{\"type\":\"%s\",\"t_start_ms\":%.1f,\"t_end_ms\":%.1f,\"seconds\":%.3f,"
             "\"wfi\":%" PRIu64 ",\"irq\":%" PRIu64 ",\"fiq\":%" PRIu64 ",\"insns\":%" PRIu64 ","
             "\"halts\":%" PRIu64 ",\"halted_ms\":%.1f,"
             "\"wakeups_per_s\":%.2f,\"irq_per_s\":%.2f,\"insns_per_s\":%.0f,"
-            "\"insns_per_wakeup\":%.1f,\"max_insns_between_wfi\":%" PRIu64 ","
+            "\"insns_per_wakeup\":%.1f,\"max_insns_between_wfi\":%s,"
             "\"busy_ratio\":%.4f,\"busy_model\":\"%s\"}\n",
             type, t_from / 1e6, t_to / 1e6, s,
             d.wfi, d.irq, d.fiq, d.insns, d.halts, d.halted_ns / 1e6,
             s > 0 ? d.wfi / s : 0, s > 0 ? d.irq / s : 0, s > 0 ? d.insns / s : 0,
-            d.wfi ? (double)d.insns / d.wfi : 0, now.max_insns_between_wfi,
+            d.wfi ? (double)d.insns / d.wfi : 0, maxb,
             busy < 0 ? 0 : busy, icount_shift >= 0 ? "icount" : "host_time");
     fflush(out);
 }
 
-/* Window bookkeeping, called at the top of every event callback (before it counts its event). */
-static void tick(void)
+static void start_window(uint64_t t)
 {
-    uint64_t t = mono_ns();
-
-    if (!win_started) {
-        if (t < start_ns) {
-            return;
-        }
-        win_started = true;
-        win = now;
-        win.max_insns_between_wfi = 0;
-        ivl = now;
-        win_t_ns = ivl_t_ns = t;
-        next_interval_ns = t + interval_ns;
-        now.max_insns_between_wfi = 0;      /* max is per window, boot bursts excluded */
-        return;
-    }
-    if (interval_ns && t >= next_interval_ns) {
-        emit("interval", &ivl, ivl_t_ns, t);
-        ivl = now;
-        ivl_t_ns = t;
-        next_interval_ns = t + interval_ns;
-    }
+    win = ivl = snapshot(t);
+    win_t_ns = ivl_t_ns = t;
+    __atomic_store_n(&max_burst, 0, __ATOMIC_RELAXED);  /* max is per window, boot bursts excluded */
+    win_started = true;
 }
 
-static void on_wfi(unsigned int vcpu, void *udata)
+/* Sleeps until the window start, then until each interval deadline (or forever without intervals). */
+static void *sampler_main(void *arg)
 {
-    uint64_t burst;
+    uint64_t next = start_ns;
 
-    tick();
-    burst = now.insns - insns_at_last_wfi;
-    now.wfi++;
-    if (have_wfi && burst > now.max_insns_between_wfi) {
-        now.max_insns_between_wfi = burst;
+    pthread_mutex_lock(&lock);
+    while (!stopping) {
+        uint64_t t = mono_ns();
+        if (t < next || (win_started && !interval_ns)) {
+            if (win_started && !interval_ns) {
+                pthread_cond_wait(&wake, &lock);
+            } else {
+                uint64_t abs = next + t0_ns;
+                struct timespec ts = { .tv_sec = abs / 1000000000u, .tv_nsec = abs % 1000000000u };
+                pthread_cond_timedwait(&wake, &lock, &ts);
+            }
+            continue;
+        }
+        if (!win_started) {
+            start_window(t);
+        } else {
+            struct counters c = snapshot(t);
+            emit("interval", &ivl, ivl_t_ns, &c, t);
+            ivl = c;
+            ivl_t_ns = t;
+        }
+        next = t + interval_ns;
+    }
+    pthread_mutex_unlock(&lock);
+    return NULL;
+}
+
+static void on_wfi_burst(unsigned int vcpu, void *udata)
+{
+    uint64_t insns = now.insns, burst = insns - insns_at_last_wfi;
+
+    if (have_wfi && burst > max_burst) {
+        __atomic_store_n(&max_burst, burst, __ATOMIC_RELAXED);
     }
     have_wfi = true;
-    insns_at_last_wfi = now.insns;
-}
-
-static void on_irq(unsigned int vcpu, void *udata)
-{
-    tick();
-    now.irq++;
-}
-
-static void on_fiq(unsigned int vcpu, void *udata)
-{
-    now.fiq++;
+    insns_at_last_wfi = insns;
 }
 
 static void on_idle(qemu_plugin_id_t id, unsigned int vcpu)
 {
-    tick();
-    now.halts++;
-    halt_start_ns = mono_ns();
+    __atomic_store_n(&now.halts, now.halts + 1, __ATOMIC_RELAXED);
+    __atomic_store_n(&halt_start_ns, mono_ns(), __ATOMIC_RELAXED);
 }
 
 static void on_resume(qemu_plugin_id_t id, unsigned int vcpu)
 {
-    if (halt_start_ns) {
-        now.halted_ns += mono_ns() - halt_start_ns;
-        halt_start_ns = 0;
+    uint64_t hs = halt_start_ns;
+
+    if (hs) {
+        /* A snapshot taken between these two stores misses this halt; the next one includes it,
+         * so only where one interval ends shifts, never the totals. */
+        __atomic_store_n(&halt_start_ns, 0, __ATOMIC_RELAXED);
+        __atomic_store_n(&now.halted_ns, now.halted_ns + (mono_ns() - hs), __ATOMIC_RELAXED);
     }
-    tick();
 }
 
 static bool is_wfi(uint32_t w)
@@ -189,23 +224,27 @@ static void on_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 {
     size_t n = qemu_plugin_tb_n_insns(tb);
 
-    qemu_plugin_register_vcpu_tb_exec_inline(tb, QEMU_PLUGIN_INLINE_ADD_U64, &now.insns, n);
-
+    if (count_insns) {
+        qemu_plugin_register_vcpu_tb_exec_inline(tb, QEMU_PLUGIN_INLINE_ADD_U64, &now.insns, n);
+    }
     for (size_t i = 0; i < n; i++) {
         struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
         uint64_t va = qemu_plugin_insn_vaddr(insn);
         uint32_t w;
 
         if (va == 0x18 || va == 0xFFFF0018) {
-            qemu_plugin_register_vcpu_insn_exec_cb(insn, on_irq, QEMU_PLUGIN_CB_NO_REGS, NULL);
+            qemu_plugin_register_vcpu_insn_exec_inline(insn, QEMU_PLUGIN_INLINE_ADD_U64, &now.irq, 1);
         } else if (va == 0x1C || va == 0xFFFF001C) {
-            qemu_plugin_register_vcpu_insn_exec_cb(insn, on_fiq, QEMU_PLUGIN_CB_NO_REGS, NULL);
+            qemu_plugin_register_vcpu_insn_exec_inline(insn, QEMU_PLUGIN_INLINE_ADD_U64, &now.fiq, 1);
         }
         /* Only 4-byte ARM instructions can be WFI on ARMv5 (Thumb-1 has no MCR). */
         if (qemu_plugin_insn_size(insn) == 4) {
             memcpy(&w, qemu_plugin_insn_data(insn), 4);    /* guest and host are little-endian */
             if (is_wfi(w)) {
-                qemu_plugin_register_vcpu_insn_exec_cb(insn, on_wfi, QEMU_PLUGIN_CB_NO_REGS, NULL);
+                qemu_plugin_register_vcpu_insn_exec_inline(insn, QEMU_PLUGIN_INLINE_ADD_U64, &now.wfi, 1);
+                if (track_burst) {
+                    qemu_plugin_register_vcpu_insn_exec_cb(insn, on_wfi_burst, QEMU_PLUGIN_CB_NO_REGS, NULL);
+                }
             }
         }
     }
@@ -213,14 +252,18 @@ static void on_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 
 static void on_atexit(qemu_plugin_id_t id, void *udata)
 {
-    uint64_t t = mono_ns();
+    uint64_t t;
 
-    if (halt_start_ns) {                    /* exiting while halted */
-        now.halted_ns += t - halt_start_ns;
-        halt_start_ns = 0;
-    }
+    pthread_mutex_lock(&lock);
+    stopping = true;
+    pthread_cond_signal(&wake);
+    pthread_mutex_unlock(&lock);
+    pthread_join(sampler, NULL);
+
+    t = mono_ns();
     if (win_started) {
-        emit("summary", &win, win_t_ns, t);
+        struct counters c = snapshot(t);
+        emit("summary", &win, win_t_ns, &c, t);
     } else {
         fprintf(out, "{\"type\":\"summary\",\"started\":false,\"t_end_ms\":%.1f,\"start_ms\":%.1f}\n",
                 t / 1e6, start_ns / 1e6);
@@ -238,10 +281,23 @@ static bool parse_u64(const char *s, uint64_t *v)
     return *s && !*end;
 }
 
+static bool parse_bool(const char *s, bool *v)
+{
+    if (!strcmp(s, "on") || !strcmp(s, "1")) {
+        *v = true;
+    } else if (!strcmp(s, "off") || !strcmp(s, "0")) {
+        *v = false;
+    } else {
+        return false;
+    }
+    return true;
+}
+
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_t *info,
                                            int argc, char **argv)
 {
     const char *path = NULL;
+    pthread_condattr_t ca;
     uint64_t v;
 
     t0_ns = 0;
@@ -258,13 +314,31 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id, const qemu_info_
             interval_ns = v * 1000000u;
         } else if (!strncmp(a, "icount_shift=", 13) && parse_u64(a + 13, &v) && v < 32) {
             icount_shift = (int)v;
+        } else if (!strncmp(a, "insns=", 6) && parse_bool(a + 6, &count_insns)) {
+            continue;
+        } else if (!strncmp(a, "burst=", 6) && parse_bool(a + 6, &track_burst)) {
+            continue;
         } else {
             fprintf(stderr, "wakeups: bad option '%s'\n", a);
             return -1;
         }
     }
+    if (track_burst && !count_insns) {
+        fprintf(stderr, "wakeups: burst=on needs insns=on\n");
+        return -1;
+    }
     if (path && !(out = fopen(path, "w"))) {
         perror(path);
+        return -1;
+    }
+
+    /* Deadlines are CLOCK_MONOTONIC, like mono_ns(), so host clock steps do not shift the window. */
+    pthread_condattr_init(&ca);
+    pthread_condattr_setclock(&ca, CLOCK_MONOTONIC);
+    pthread_cond_init(&wake, &ca);
+    pthread_condattr_destroy(&ca);
+    if (pthread_create(&sampler, NULL, sampler_main, NULL)) {
+        fprintf(stderr, "wakeups: cannot start sampler thread\n");
         return -1;
     }
 

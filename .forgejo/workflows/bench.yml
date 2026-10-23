@@ -1,0 +1,38 @@
+name: bench
+# Phase 1/2 benchmarks (docs/PERFORMANCE.md). Manual: Actions -> bench -> Run workflow, or
+# POST /api/v1/repos/root/QEMU-EOS-Optimized/actions/workflows/bench.yml/dispatches {"ref": "<branch>"}.
+# Runs alone on the shared runner, so numbers are comparable within one run only.
+on:
+  workflow_dispatch:
+
+jobs:
+  bench:
+    runs-on: linux-podman
+    env:
+      SANDBOX: --rm --network=none --security-opt label=disable --cap-drop=all --security-opt no-new-privileges --pids-limit=512
+    steps:
+      - name: Checkout
+        run: |
+          rm -rf src-checkout && mkdir src-checkout && cd src-checkout
+          git init -q .
+          git -c "http.extraheader=Authorization: Bearer ${{ github.token }}" \
+              fetch -q --depth=1 "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.sha }}"
+          git checkout -q FETCH_HEAD
+          echo "runner: $(nproc) CPUs, $(free -m | awk '/Mem:/{print $2}') MiB RAM; load $(cut -d' ' -f1-3 /proc/loadavg)"
+
+      - name: Benchmark suite
+        env:
+          ROM_TOKEN: ${{ secrets.ROM_TOKEN }}
+        run: |
+          start=$(date +%s)
+          src-checkout/ci/bench-suite.sh
+          echo "suite done in $(( $(date +%s) - start ))s"
+
+      - name: Upload results
+        if: always()
+        run: |
+          rm -rf bench-artifacts && mkdir -p bench-artifacts
+          if [ -d src-checkout/emu-out/bench ]; then cp -r src-checkout/emu-out/bench/. bench-artifacts/; fi
+          find bench-artifacts -type f \( -iname '*.bin' -o -iname '*.img' -o -iname '*.qcow2' -o -iname '*.o' \
+              -o -iname '*.elf' -o -iname '*.so' -o -iname '*.ppm' -o -size +20M \) -delete
+          src-checkout/ci/upload-artifact.sh qemu-eos-bench bench-artifacts

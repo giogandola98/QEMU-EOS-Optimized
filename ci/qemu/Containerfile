@@ -19,7 +19,10 @@ RUN apt-get update \
 
 # QEMU_PROFILE selects the configure flags:
 #   baseline  exactly what ML-Optimized's in-tree image used (QEMU defaults: -O2 -g), the phase-1 reference
-ARG QEMU_PROFILE=baseline
+#   opt       baseline + link-time optimisation, no debug info / debug-tcg, and every block driver, crypto
+#             backend, accelerator and host feature the EOS models never use left out (smaller binary,
+#             fewer constructors at start-up). Measured against baseline in docs/PERFORMANCE.md.
+ARG QEMU_PROFILE=opt
 
 COPY . /src/qemu-eos
 
@@ -37,6 +40,19 @@ RUN set -e; \
       --disable-spice --disable-xen --disable-guest-agent"; \
     case "$QEMU_PROFILE" in \
       baseline) ../qemu-eos/configure $common ;; \
+      opt) AR=gcc-ar NM=gcc-nm RANLIB=gcc-ranlib ../qemu-eos/configure $common \
+             --disable-debug-info --disable-debug-tcg \
+             --extra-cflags="-O2 -flto=auto" --extra-ldflags="-O2 -flto=auto" \
+             --disable-kvm --disable-hax --disable-tpm --disable-numa --disable-rdma --disable-pvrdma \
+             --disable-vhost-net --disable-vhost-user --disable-vhost-kernel --disable-vhost-vsock \
+             --disable-vhost-scsi --disable-vhost-crypto --disable-virtfs --disable-attr --disable-cap-ng \
+             --disable-seccomp --disable-linux-aio --disable-libiscsi --disable-libnfs --disable-rbd \
+             --disable-glusterfs --disable-curl --disable-bzip2 --disable-lzo --disable-snappy \
+             --disable-libssh --disable-libxml2 --disable-libpmem --disable-mpath --disable-smartcard \
+             --disable-crypto-afalg --disable-gnutls --disable-nettle --disable-gcrypt --disable-auth-pam \
+             --disable-bochs --disable-cloop --disable-dmg --disable-qcow1 --disable-vdi --disable-vvfat \
+             --disable-qed --disable-parallels --disable-sheepdog --disable-replication \
+             --disable-live-block-migration ;; \
       *) echo "unknown QEMU_PROFILE $QEMU_PROFILE" >&2; exit 1 ;; \
     esac; \
     make -j"$(nproc)"; \

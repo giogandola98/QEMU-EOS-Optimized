@@ -6,6 +6,7 @@ import sys
 N_WFI = 200                 # wfi_test.S
 # Instructions per cycle in wfi_test.S: WFI 1 + unmask 3 + IRQ entry/handler 10 + re-mask 2
 # + ldr 1 + busy 2*1000 + loop 2 = 2019. The summary also holds a few setup/exit instructions.
+# max_insns_between_wfi needs burst=on (runs 1 and 3).
 INSNS_PER_WAKEUP = (2000, 2040)
 
 
@@ -36,6 +37,10 @@ def main():
     expect(s["wfi"] == N_WFI, "wfi == %d (got %d)" % (N_WFI, s["wfi"]))
     expect(s["irq"] == N_WFI, "irq == %d (got %d)" % (N_WFI, s["irq"]))
     expect(s["fiq"] == 0, "fiq == 0 (got %d)" % s["fiq"])
+    if case == "run5":       # insns=off: no instruction counter, no burst tracking
+        expect(s["insns"] == 0, "insns == 0 with insns=off (got %d)" % s["insns"])
+        expect(s["max_insns_between_wfi"] is None, "max_insns_between_wfi null without burst=on")
+        return report(errors)
     lo, hi = INSNS_PER_WAKEUP
     expect(lo <= s["insns_per_wakeup"] <= hi,
            "insns_per_wakeup in [%d, %d] (got %.1f)" % (lo, hi, s["insns_per_wakeup"]))

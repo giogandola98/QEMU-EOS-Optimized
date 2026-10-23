@@ -33,8 +33,8 @@ check() {      # $1 = description, $2.. = command
     if "$@"; then echo "PASS: $what"; else echo "FAIL: $what"; fail=1; fi
 }
 
-echo "== run 1: full window, 50 ms intervals"
-run_test "interval_ms=50" "$OUT/run1.json" > "$OUT/run1.log" 2>&1 && rc=0 || rc=$?
+echo "== run 1: full window, 50 ms intervals, burst tracking"
+run_test "interval_ms=50,arg=burst=on" "$OUT/run1.json" > "$OUT/run1.log" 2>&1 && rc=0 || rc=$?
 cat "$OUT/run1.log" "$OUT/run1.json" || true
 check "guest exit code 0 (guest saw one IRQ per WFI)" test "$rc" -eq 0
 check "plugin counts" python3 -I "$HERE/check.py" run1 "$OUT/run1.json"
@@ -48,7 +48,7 @@ check "summary reports window not started" python3 -I "$HERE/check.py" run2 "$OU
 echo "== run 3: icount busy model"
 timeout 60 qemu-system-arm -M versatilepb -cpu arm926 -m 16M -nodefaults \
     -display none -monitor none -serial none -semihosting -icount shift=4 \
-    -kernel "$OUT/wfi_test.elf" -plugin "$PLUGIN,arg=out=$OUT/run3.json,arg=icount_shift=4" \
+    -kernel "$OUT/wfi_test.elf" -plugin "$PLUGIN,arg=out=$OUT/run3.json,arg=icount_shift=4,arg=burst=on" \
     > "$OUT/run3.log" 2>&1 && rc=0 || rc=$?
 cat "$OUT/run3.log" "$OUT/run3.json" || true
 check "guest exit code 0" test "$rc" -eq 0
@@ -57,6 +57,12 @@ check "icount counts" python3 -I "$HERE/check.py" run3 "$OUT/run3.json"
 echo "== run 4: bad option is rejected"
 if run_test "bogus=1" "$OUT/run4.json" > "$OUT/run4.log" 2>&1; then rc=0; else rc=$?; fi
 check "QEMU refuses to start with a bad plugin option" test "$rc" -ne 0
+
+echo "== run 5: instruction counter off (cheapest mode)"
+run_test "insns=off" "$OUT/run5.json" > "$OUT/run5.log" 2>&1 && rc=0 || rc=$?
+cat "$OUT/run5.json" || true
+check "guest exit code 0" test "$rc" -eq 0
+check "wfi/irq counted without insns" python3 -I "$HERE/check.py" run5 "$OUT/run5.json"
 
 if [ "$fail" -ne 0 ]; then echo "SELFTEST FAILED"; exit 1; fi
 echo "SELFTEST PASSED"
