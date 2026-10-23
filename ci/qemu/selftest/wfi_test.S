@@ -4,7 +4,9 @@
  * Runs N_WFI idle cycles. Each cycle: WFI with IRQs masked (the core still wakes on a pending IRQ),
  * unmask so exactly one SP804 timer IRQ is taken, mask again, burn a fixed busy loop.
  * Masking around the WFI makes the count deterministic (one WFI, one IRQ per cycle) whatever the
- * host speed. The program exits through semihosting: exit code 0 iff its own IRQ counter == N_WFI.
+ * host speed. The IRQ handler also returns with IRQs masked (I bit set in SPSR): otherwise, when the
+ * host stalls the vCPU for over 1 ms between the handler's IntClr and the re-mask (seen on a loaded
+ * CI runner), the next timer tick is taken as a second IRQ in the same cycle (irq = N_WFI + 1). The program exits through semihosting: exit code 0 iff its own IRQ counter == N_WFI.
  * The plugin must then report wfi == irq == N_WFI.
  */
         .equ N_WFI,      200
@@ -85,6 +87,9 @@ irq_handler:
         push    {r0, r1}
         ldr     r0, =TIMER0
         str     r0, [r0, #0x0C]         @ IntClr (any value)
+        mrs     r1, spsr
+        orr     r1, r1, #0x80
+        msr     spsr_c, r1              @ return with IRQs masked: at most one IRQ per unmask
         ldr     r0, =irq_count
         ldr     r1, [r0]
         add     r1, r1, #1

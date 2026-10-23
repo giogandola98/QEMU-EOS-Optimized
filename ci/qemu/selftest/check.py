@@ -4,8 +4,8 @@ import json
 import sys
 
 N_WFI = 200                 # wfi_test.S
-# Instructions per cycle in wfi_test.S: WFI 1 + unmask 3 + IRQ entry/handler 10 + re-mask 2
-# + ldr 1 + busy 2*1000 + loop 2 = 2019. The summary also holds a few setup/exit instructions.
+# Instructions per cycle in wfi_test.S: WFI 1 + unmask 3 + IRQ entry/handler 13 + re-mask 2
+# + ldr 1 + busy 2*1000 + loop 2 = 2022. The summary also holds a few setup/exit instructions.
 # max_insns_between_wfi needs burst=on (runs 1 and 3).
 INSNS_PER_WAKEUP = (2000, 2040)
 
