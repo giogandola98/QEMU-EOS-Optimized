@@ -235,6 +235,8 @@ def main():
     ap.add_argument("--key-stable", type=float, default=1.0, help="s unchanged = settled (scenarios)")
     ap.add_argument("--gui-timeout", type=float, default=120.0)
     ap.add_argument("--count", action="append", default=[], help="count lines of qemu.log containing this text")
+    ap.add_argument("--min-count", action="append", default=[],
+                    help="TEXT=N: error unless qemu.log has at least N lines containing TEXT")
     ap.add_argument("--step", action="append", default=[],
                     help="after the idle window, in order: key:K (sendkey K), wait:S, shot:NAME (frame hash + "
                          "PNG), mon:CMD (monitor command, output kept); --count texts are also counted per "
@@ -408,10 +410,19 @@ def main():
             seg = raw[prev:st["log"]].decode(errors="replace").splitlines()
             st["counts"] = {c: sum(1 for l in seg if c in l) for c in a.count}
             prev = st["log"]
+    for spec in a.min_count:
+        txt, n = spec.rsplit("=", 1)
+        got = sum(1 for l in text.splitlines() if txt in l)
+        res.setdefault("min_counts", {})[txt] = got
+        if got < int(n):
+            res["errors"].append("log: %d lines with %r, expected >= %s" % (got, txt, n))
     res["qemu_errors"] = [l for l in text.splitlines() if "Assertion" in l or "qemu-system-arm:" in l][-5:]
 
+    # Frames this run tries to capture: the GUI, the scenarios (unless skipped) and the step shots
+    wanted = {"gui"} | (set() if a.no_scenarios else {n for n, _ in cam["scenarios"]}) | \
+        {st.split(":", 1)[1] for st in a.step if st.startswith("shot:")}
     for name, want in expect.items():
-        if res["frames"].get(name) != want:
+        if name in wanted and res["frames"].get(name) != want:
             res["errors"].append("frame %s: got %s, expected %s" % (name, res["frames"].get(name), want))
     for m, ok in res["uart_markers"].items():
         if not ok:
