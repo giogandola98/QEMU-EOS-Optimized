@@ -2378,7 +2378,7 @@ unsigned int eos_default_handle(unsigned int address, unsigned char type, unsign
     return data;
 }
 
-EOSRegionHandler *eos_find_handler(unsigned int address)
+static EOSRegionHandler *eos_find_handler_slow(unsigned int address)
 {
     int pos = 0;
     for(pos = 0; pos < sizeof(eos_handlers) / sizeof(eos_handlers[0]); pos++)
@@ -2390,6 +2390,43 @@ EOSRegionHandler *eos_find_handler(unsigned int address)
     }
 
     return NULL;
+}
+
+/*
+ * Every guest MMIO access lands here, and the table has ~120 entries scanned in order (the DIGIC 4
+ * clock/power registers polled by the idle loop are near the end). Firmware touches only a few hundred
+ * distinct register addresses, so a direct-mapped cache keyed by the exact address returns the same
+ * first-match result as the scan. Runs under the BQL like all MMIO handlers, so no locking.
+ * QEMU_EOS_MMIO_CACHE=0 disables it (A/B measurements, docs/PERFORMANCE.md).
+ */
+#define EOS_HANDLER_CACHE_SIZE 1024     /* power of 2 */
+static struct {
+    unsigned int address;
+    EOSRegionHandler *handler;          /* NULL = empty slot (misses are not cached) */
+} eos_handler_cache[EOS_HANDLER_CACHE_SIZE];
+
+EOSRegionHandler *eos_find_handler(unsigned int address)
+{
+    static int use_cache = -1;
+    unsigned int slot = (address >> 2) & (EOS_HANDLER_CACHE_SIZE - 1);
+
+    if (use_cache < 0) {
+        const char *env = getenv("QEMU_EOS_MMIO_CACHE");
+        use_cache = !(env && env[0] == '0');
+    }
+    if (!use_cache) {
+        return eos_find_handler_slow(address);
+    }
+    if (eos_handler_cache[slot].handler && eos_handler_cache[slot].address == address) {
+        return eos_handler_cache[slot].handler;
+    }
+
+    EOSRegionHandler *handler = eos_find_handler_slow(address);
+    if (handler) {
+        eos_handler_cache[slot].address = address;
+        eos_handler_cache[slot].handler = handler;
+    }
+    return handler;
 }
 
 unsigned int eos_handler(unsigned int address, unsigned char type, unsigned int value)
@@ -2411,7 +2448,15 @@ unsigned int eos_trigger_int(unsigned int id, unsigned int delay)
 {
     assert(id);
 
-    usleep(250);
+    /* QEMU_EOS_INT_SLEEP_US overrides the 250 us below (A/B measurements only; see the note). */
+    static int sleep_us = -1;
+    if (sleep_us < 0) {
+        const char *env = getenv("QEMU_EOS_INT_SLEEP_US");
+        sleep_us = env ? atoi(env) : 250;
+    }
+    if (sleep_us > 0) {
+        usleep(sleep_us);
+    }
     // This sleep prevents interrupt handlers triggering resource
     // starvation of other qemu threads, should the handler trigger
     // its own interrupt.
