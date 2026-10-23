@@ -1,6 +1,6 @@
 {
  "what": "Phase-1 baseline: qemu-eos 4.2.1 as ML-Optimized used it (QEMU_PROFILE=baseline, plugin v1, original MMIO handler scan), 1100D fw 1.0.5, Canon firmware only (no ML), medians of interleaved repetitions.",
- "source": "QEMU-EOS-Optimized bench workflow run 7 (<forgejo-server>/root/QEMU-EOS-Optimized/actions/runs/7), commit 5dda6f5315",
+ "source": "QEMU-EOS-Optimized bench workflow run 7, commit 5dda6f5315",
  "runner": {
   "cpus": 4,
   "ram_mib": 4000,

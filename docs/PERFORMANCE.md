@@ -70,7 +70,7 @@ handlers would need a `VMStateDescription`, and the legacy `sd_init()` card woul
 
     # CI: Actions -> bench -> Run workflow (branch), or
     curl -u USER:TOKEN -X POST -H 'Content-Type: application/json' -d '{"ref":"main"}' \
-        <forgejo-server>/api/v1/repos/root/QEMU-EOS-Optimized/actions/workflows/bench.yml/dispatches
+        <forgejo>/api/v1/repos/<owner>/QEMU-EOS-Optimized/actions/workflows/bench.yml/dispatches
     # one run by hand, inside the image, ROMs in ./roms/1100D/
     podman run --rm --tmpfs /tmp -v "$PWD":/work -v "$PWD/roms":/roms:ro -w /work IMAGE \
         python3 -I bench/bench.py --rom-dir /roms --out emu-out/run1 --plugin /opt/qemu-eos/plugins/libwakeups.so \

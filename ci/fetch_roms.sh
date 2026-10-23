@@ -3,7 +3,8 @@
 # Runs on the CI host (outside containers); same scheme as ML-Optimized ci/qemu/fetch_roms.sh.
 #
 # Usage: ci/fetch_roms.sh CAM-FW DEST          e.g. ci/fetch_roms.sh 1100D-105 /dev/shm/roms.X
-# Package: $FORGEJO_URL/api/packages/<private-org>/generic/canon-rom/<CAM>-<FW>/{ROM0.BIN,ROM1.BIN,SFDATA.BIN}
+# Package: $GITHUB_SERVER_URL/api/packages/$ROM_PKG_OWNER/generic/canon-rom/<CAM>-<FW>/{ROM0.BIN,ROM1.BIN,SFDATA.BIN}
+#          (ROM_PKG_OWNER: CI variable naming a PRIVATE org; unset => exit 3, not available)
 # Auth:    $ROM_TOKEN (repo secret: a personal access token with only read:package).
 # Exit:    0 fetched and verified (sha256 from the server, MD5 from ci/rom-md5.txt), 3 not available, 1 error.
 # The token reaches curl through a mode-600 header file, never a command line or the log.
@@ -11,8 +12,12 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 VERSION=${1:?usage: fetch_roms.sh CAM-FW DEST}
 DEST=${2:?usage: fetch_roms.sh CAM-FW DEST}
-FORGEJO_URL=${FORGEJO_URL:-${GITHUB_SERVER_URL:-<forgejo-server>}}
-OWNER=${ROM_PKG_OWNER:-<private-org>}
+FORGEJO_URL=${FORGEJO_URL:-${GITHUB_SERVER_URL:-}}
+OWNER=${ROM_PKG_OWNER:-}
+if [ -z "$FORGEJO_URL" ] || [ -z "$OWNER" ]; then
+    echo "ROM package server/owner not configured (GITHUB_SERVER_URL, ROM_PKG_OWNER): ROMs not available" >&2
+    exit 3
+fi
 PKG=canon-rom
 
 case "$VERSION" in *[!A-Za-z0-9-]*|""|-*) echo "bad CAM-FW '$VERSION'" >&2; exit 1;; esac

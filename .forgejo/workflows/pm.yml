@@ -9,6 +9,9 @@ jobs:
   pm:
     runs-on: linux-podman
     env:
+      # Private org owning the ROM packages and the image registry (repo variable); server = this CI server.
+      ROM_PKG_OWNER: ${{ vars.ROM_PKG_OWNER }}
+      GITHUB_SERVER_URL: ${{ github.server_url }}
       SANDBOX: --rm --network=none --security-opt label=disable --cap-drop=all --security-opt no-new-privileges --pids-limit=512
     steps:
       - name: Checkout
