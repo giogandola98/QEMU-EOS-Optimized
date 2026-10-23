@@ -1,0 +1,65 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  image:
+    # Host executor of runner linux-podman-105 (shared, runs as root, has podman): every step that runs
+    # repository code does so inside a confined container ($SANDBOX). Only image builds get the network.
+    runs-on: linux-podman
+    env:
+      SANDBOX: --rm --network=none --security-opt label=disable --cap-drop=all --security-opt no-new-privileges --pids-limit=512
+    steps:
+      - name: Checkout
+        run: |
+          rm -rf src-checkout && mkdir src-checkout && cd src-checkout
+          git init -q .
+          git -c "http.extraheader=Authorization: Bearer ${{ github.token }}" \
+              fetch -q --depth=1 "${{ github.server_url }}/${{ github.repository }}.git" "${{ github.sha }}"
+          git checkout -q FETCH_HEAD
+          echo "runner: $(nproc) CPUs, $(free -m | awk '/Mem:/{print $2}') MiB RAM, $(podman --version)"
+
+      - name: Build image
+        run: |
+          start=$(date +%s)
+          src-checkout/ci/build-image.sh > .image
+          echo "image $(cat .image) ready in $(( $(date +%s) - start ))s"
+
+      - name: Plugin self-test (no ROM needed)
+        run: |
+          podman run $SANDBOX --tmpfs /tmp -v "$PWD/src-checkout:/work" -w /work \
+              -e PLUGIN=/opt/qemu-eos/plugins/libwakeups.so "$(cat .image)" ci/qemu/selftest/selftest.sh emu-out/selftest
+
+      - name: 1100D smoke test (boot to GUI, scripted scenarios)
+        env:
+          ROM_TOKEN: ${{ secrets.ROM_TOKEN }}
+        run: |
+          start=$(date +%s)
+          src-checkout/ci/smoke.sh "$(cat .image)"
+          echo "smoke test done in $(( $(date +%s) - start ))s"
+
+      - name: Publish image (<private-org> registry)
+        if: github.event_name == 'push'
+        env:
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -o pipefail
+          sha=$(git -C src-checkout rev-parse HEAD)
+          tags="$sha"
+          if [ "${{ github.ref_name }}" = main ]; then tags="$tags main"; fi
+          src-checkout/ci/publish-image.sh "$(cat .image)" $tags | tee .published
+          echo "ML-Optimized pins this image in ci/qemu-image.txt:"
+          tail -n 1 .published
+
+      - name: Upload results
+        if: always()
+        run: |
+          # Results only: JSON, logs, screenshots. Never ROMs, disk images, snapshots or binaries.
+          rm -rf ci-artifacts && mkdir -p ci-artifacts
+          if [ -d src-checkout/emu-out ]; then cp -r src-checkout/emu-out/. ci-artifacts/; fi
+          find ci-artifacts -type f \( -iname '*.bin' -o -iname '*.img' -o -iname '*.qcow2' -o -iname '*.o' \
+              -o -iname '*.elf' -o -iname '*.so' -o -iname '*.ppm' -o -size +20M \) -delete
+          if [ -f .published ]; then cp .published ci-artifacts/published.txt; fi
+          find ci-artifacts -type f | sort
+          src-checkout/ci/upload-artifact.sh qemu-eos-ci ci-artifacts

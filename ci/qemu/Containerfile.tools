@@ -1,0 +1,17 @@
+# Published image = QEMU base image (ci/qemu/Containerfile) + our TCG plugins.
+# Separate file so a plugin change rebuilds in seconds instead of recompiling QEMU.
+# Build:  podman build -t qemu-eos --build-arg BASE=qemu-eos-base --build-arg GIT_SHA=$(git rev-parse HEAD) \
+#             -f ci/qemu/Containerfile.tools ci/qemu
+#
+# Adds to /opt/qemu-eos:
+#   plugins/libwakeups.so   idle/IRQ/instruction counters (plugins/wakeups.c, docs/PERFORMANCE.md)
+#   src/plugins/            plugin sources, build-plugin.sh   (to rebuild or patch at job time)
+#   QEMU_EOS_SHA            commit of QEMU-EOS-Optimized the image was built from
+ARG BASE=qemu-eos-base
+FROM ${BASE}
+
+ARG GIT_SHA=unknown
+COPY plugins /opt/qemu-eos/src/plugins
+COPY build-plugin.sh /opt/qemu-eos/src/build-plugin.sh
+RUN /opt/qemu-eos/src/build-plugin.sh /opt/qemu-eos/plugins \
+ && echo "$GIT_SHA" > /opt/qemu-eos/QEMU_EOS_SHA

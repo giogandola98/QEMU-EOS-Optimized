@@ -1,0 +1,9 @@
+# Build context of ci/qemu/Containerfile is the repo root: only QEMU sources go in, so CI scripts,
+# benchmarks and docs never invalidate the (slow) QEMU build layer.
+.git
+.forgejo
+ci
+bench
+emu-out
+docs/PLAN.md
+docs/PERFORMANCE.md
