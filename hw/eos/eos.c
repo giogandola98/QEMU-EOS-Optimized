@@ -151,6 +151,12 @@ static void eos_1300D_machine_init(MachineClass *mc)
     mc->init = eos_init;
 }
 
+static void eos_4000D_machine_init(MachineClass *mc)
+{
+    mc->desc = "Canon EOS 4000D";
+    mc->init = eos_init;
+}
+
 static void eos_A1100_machine_init(MachineClass *mc)
 {
     mc->desc = "Canon EOS A1100";
@@ -397,6 +403,7 @@ DEFINE_MACHINE(MODEL_NAME_600D, eos_600D_machine_init)
 DEFINE_MACHINE(MODEL_NAME_1100D, eos_1100D_machine_init)
 DEFINE_MACHINE(MODEL_NAME_1200D, eos_1200D_machine_init)
 DEFINE_MACHINE(MODEL_NAME_1300D, eos_1300D_machine_init)
+DEFINE_MACHINE(MODEL_NAME_4000D, eos_4000D_machine_init)
 DEFINE_MACHINE(MODEL_NAME_A1100, eos_A1100_machine_init)
 DEFINE_MACHINE(MODEL_NAME_5D3, eos_5D3_machine_init)
 DEFINE_MACHINE(MODEL_NAME_5D3eeko, eos_5D3eeko_machine_init)
@@ -742,15 +749,19 @@ static void eos_rom_write(void *opaque, hwaddr addr, uint64_t value, uint32_t si
     uint32_t rom_addr = (rom_id) ? ROM1_ADDR : ROM0_ADDR;;
     uint32_t address = rom_addr + addr;
 
-    if (strcmp(s->model->name, MODEL_NAME_1300D) == 0)
+    if (strcmp(s->model->name, MODEL_NAME_1300D) == 0 ||
+        strcmp(s->model->name, MODEL_NAME_4000D) == 0)
     {
         if (address == 0xF8000000 && size == 1 && value == 6)
         {
             // Reading flash model ID?
             // Startup code writes to this address, but expects to read
             // different values: C2 25 39, 20 BB 19 or 01 02 19.
+            // 4000D 1.1.0 accepts C2 25 38, 20 BB 18 or 01 20 18 instead
+            // (FE0C1BC0, assert Startup.c:220 otherwise): a 16MB part.
             msg = "Flash model ID?";
-            uint32_t model_id = 0x003925C2;
+            uint32_t model_id = strcmp(s->model->name, MODEL_NAME_4000D) == 0
+                ? 0x003825C2 : 0x003925C2;
             MEM_WRITE_ROM(address, (uint8_t *) &model_id, 4);
             goto end;
         }
@@ -1845,6 +1856,17 @@ static void *eos_init_cpu(void)
     if (ROM1_SIZE)
     {
         eos_init_rom(1, &eos_state->rom1, ROM1_ADDR, ROM1_SIZE, 0x100000000);
+    }
+
+    if (eos_state->model->rom1_hivecs_offset)
+    {
+        /* 4000D: the 16MB ROM1 mirror puts flash log data at 0xFFFF0000, yet the bootloader
+         * (linked at 0xFFFF0000) sits at ROM1 offset 0x10000. The reset vector must reach it,
+         * so overlay that 64K block on top of the mirror. */
+        MemoryRegion *boot = g_new(MemoryRegion, 1);
+        memory_region_init_alias(boot, NULL, "eos.rom1_hivecs", &eos_state->rom1,
+                                 eos_state->model->rom1_hivecs_offset, 0x10000);
+        memory_region_add_subregion_overlap(eos_state->system_mem, 0xFFFF0000, boot, 1);
     }
 
     //memory_region_init_ram(&s->rom1, "eos.rom", 0x10000000, &error_abort);
@@ -3647,7 +3669,8 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
             break;
 
       case 0xF48C:
-            if(strcmp(eos_state->model->name, MODEL_NAME_1300D) == 0)
+            if (strcmp(eos_state->model->name, MODEL_NAME_1300D) == 0 ||
+                strcmp(eos_state->model->name, MODEL_NAME_4000D) == 0)
             {
                 /* 1300D: return 0 here to bypass "System & Display Check & Adjustment program" */
                 /* 0x4000000 = HDMI disconnected */
