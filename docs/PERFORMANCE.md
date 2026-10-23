@@ -58,6 +58,15 @@ Debian bookworm's stock `qemu-system-arm` 7.2 runs the same microbenchmark at 35
 build, so the low absolute MIPS are this runner (shared, loaded host), not our TCG. The host loop
 (`microbench.py`, dependent 64-bit multiply-add) takes ~1.9 ns/iteration there.
 
+### Plugin self-test under load
+
+`ci/qemu/selftest/` checks exact counts (wfi = irq = 200) on a bare-metal guest with a 1 ms host-time timer.
+On the loaded shared runner (load ~8-10 on 4 vCPUs) it once saw irq = 201: when the vCPU thread is descheduled
+for over 1 ms between the IRQ handler's `IntClr` and the guest's re-mask, the next tick is taken as a second IRQ
+in the same cycle. The handler now returns with IRQs masked (I bit set in SPSR), so each unmask admits exactly
+one IRQ whatever the host does; the exact counts are unchanged. Under 6 CPU spinners per core: old guest 4/550
+runs wrong (irq 201/202), new guest 0/550.
+
 ### Snapshots: what would be needed
 
 Each EOS device in `hw/eos` (EOSState: interrupt controller and schedule, DIGIC/UTimer/HPTimer, MPU state machine,
