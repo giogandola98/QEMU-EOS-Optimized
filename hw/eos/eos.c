@@ -20,6 +20,7 @@
 #include "hw/arm/armv7m.h"
 #include "hw/eos/eos.h"
 #include "hw/eos/dbi/logging.h"
+#include "hw/eos/dbi/backtrace.h"
 
 #include "hw/eos/model_list.h"
 #include "hw/eos/eos_ml_helpers.h"
@@ -2540,6 +2541,12 @@ static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int 
         /* every LCLK edge (ClockSaver), not only the first 40 accesses: what the deep sleep depends on */
         fprintf(stderr, "[PM1100D] LCLK %s (CLOCK_ENABLE 0x%X, pc %08X)\n", (value & 2) ? "on" : "off",
                 value, CURRENT_CPU->env.regs[15]);
+    }
+    if (trace && idx == 0 && (type & MODE_WRITE)) {
+        /* ClockSaver client mask: who changes it (stack walk), to find the client keeping LCLK on */
+        char bt[512] = "";
+        eos_backtrace_rebuild(bt, sizeof(bt));
+        fprintf(stderr, "[PM1100D] LCLK mask <- 0x%X from %s\n", value, bt);
     }
     if (trace && trace_count[idx]++ < 40) {
         fprintf(stderr, "[PM1100D] %s 0x%08X %s 0x%X (pc %08X)\n", (type & MODE_WRITE) ? "W" : "R",
