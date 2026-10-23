@@ -2436,7 +2436,8 @@ EOSRegionHandler *eos_find_handler(unsigned int address)
  *   0xC0F01004       LCLK client mask: reads 0x400, what the low-clock WFI path expects at idle
  *   0xC0400004       clock select (0x03 <-> 0x17 around that WFI): stored
  *   0xC0220094 bit0  selfRefresh enabled (GPIO): 1
- *   0xC0210600 bit0, 0xC0100110 bit31, 0xC022F198 bit0, 0xC0100204   handshakes: ready at once
+ *   0xC0210600 bit0, 0xC0100110 bit31, 0xC0100204   handshakes: ready at once. 0xC022F198 keeps its
+ *                    0/1 toggle (eos_handle_gpio): the bootloader waits for bit0 = 1 there, selfRefresh for 0
  *   0xC0201308 bit4  wake flag polled with IRQs masked: set while an interrupt is pending. While none is,
  *                    the vCPU is halted (like WFI) instead of spinning, until the next interrupt.
  * QEMU_EOS_PM_TRACE=1 prints the first accesses to each of these registers; QEMU_EOS_PM_MODEL=0 disables
@@ -2468,13 +2469,13 @@ static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int 
         if (reg) {
             *reg = value;
         }
-        /* timer 6 control and CLOCK_ENABLE keep their usual side effects */
-        handled = (idx != 3 && idx != 7);
+        /* timer 6 control, 0xC022F198 and CLOCK_ENABLE keep their usual handlers */
+        handled = (idx != 3 && idx != 5 && idx != 7);
     } else {
         switch (idx) {
         case 0: *ret = 0x400; break;
         case 2: *ret = 1; break;
-        case 5: *ret = 0; break;
+        case 5: handled = false; break;
         case 6: {
             CPUState *cs = CPU(CURRENT_CPU);
             bool pending = eos_state->irq_id || (cs->interrupt_request & CPU_INTERRUPT_HARD);
