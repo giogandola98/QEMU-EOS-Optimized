@@ -215,7 +215,12 @@ typedef struct {
     int bits;
     target_long mask;
 } TargetPageBits;
-#if defined(CONFIG_ATTRIBUTE_ALIAS) || !defined(IN_EXEC_VARY)
+/*
+ * QEMU_LTO (set by the opt build profile): with -flto GCC sees that the const alias points at a
+ * zero-initialised object and folds target_page.bits to 0 (phys_section_add assertion at start-up).
+ * LTO builds therefore use one plain, writable declaration everywhere (see exec-vary.c).
+ */
+#if !defined(QEMU_LTO) && (defined(CONFIG_ATTRIBUTE_ALIAS) || !defined(IN_EXEC_VARY))
 extern const TargetPageBits target_page;
 #else
 extern TargetPageBits target_page;

@@ -25,7 +25,7 @@
 #include "exec/exec-all.h"
 
 #ifdef TARGET_PAGE_BITS_VARY
-# ifdef CONFIG_ATTRIBUTE_ALIAS
+# if defined(CONFIG_ATTRIBUTE_ALIAS) && !defined(QEMU_LTO)
 /*
  * We want to declare the "target_page" variable as const, which tells
  * the compiler that it can cache any value that it reads across calls.
@@ -64,6 +64,7 @@ extern const TargetPageBits target_page
  * by way of suppressing the header declaration with IN_EXEC_VARY.
  * We assume that on such an old compiler, LTO cannot be used, and so the
  * compiler cannot not detect the mismatched declarations, and all is well.
+ * With QEMU_LTO the header declares it non-const too, so the declarations match.
  */
 TargetPageBits target_page;
 #  define init_target_page target_page

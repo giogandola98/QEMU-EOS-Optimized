@@ -42,7 +42,7 @@ RUN set -e; \
       baseline) ../qemu-eos/configure $common ;; \
       opt) AR=gcc-ar NM=gcc-nm RANLIB=gcc-ranlib ../qemu-eos/configure $common \
              --disable-debug-info --disable-debug-tcg \
-             --extra-cflags="-O2 -flto=auto" --extra-ldflags="-O2 -flto=auto" \
+             --extra-cflags="-O2 -flto=auto -DQEMU_LTO" --extra-ldflags="-O2 -flto=auto" \
              --disable-kvm --disable-hax --disable-tpm --disable-numa --disable-rdma --disable-pvrdma \
              --disable-vhost-net --disable-vhost-user --disable-vhost-kernel --disable-vhost-vsock \
              --disable-vhost-scsi --disable-vhost-crypto --disable-virtfs --disable-attr --disable-cap-ng \
