@@ -2429,8 +2429,94 @@ EOSRegionHandler *eos_find_handler(unsigned int address)
     return handler;
 }
 
+/*
+ * 1100D power management (PowerMgr idle loop and selfRefresh; ML-Optimized docs/firmware/1100D-powersave.md).
+ * Without these, Canon's mode-2 idle loop finds neither sleep condition and spins at 0xFF1EA818.
+ *   0xC0400008 bit1  image-engine clock (LCLK): written by ClockSaver, stored by eos_handle_basic
+ *   0xC0F01004       LCLK client mask: reads 0x400, what the low-clock WFI path expects at idle
+ *   0xC0400004       clock select (0x03 <-> 0x17 around that WFI): stored
+ *   0xC0220094 bit0  selfRefresh enabled (GPIO): 1
+ *   0xC0210600 bit0, 0xC0100110 bit31, 0xC022F198 bit0, 0xC0100204   handshakes: ready at once
+ *   0xC0201308 bit4  wake flag polled with IRQs masked: set while an interrupt is pending. While none is,
+ *                    the vCPU is halted (like WFI) instead of spinning, until the next interrupt.
+ * QEMU_EOS_PM_TRACE=1 prints the first accesses to each of these registers; QEMU_EOS_PM_MODEL=0 disables
+ * the model.
+ */
+static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int value, unsigned int *ret)
+{
+    static uint32_t clksel, lclk_mask, wake_ctrl, timer600 = 1, basic204;
+    static int trace = -1;
+    static unsigned int trace_count[8];
+    uint32_t *reg = NULL;
+    int idx;
+
+    switch (address) {
+    case 0xC0F01004: idx = 0; reg = &lclk_mask; break;
+    case 0xC0400004: idx = 1; reg = &clksel; break;
+    case 0xC0220094: idx = 2; break;
+    case 0xC0210600: idx = 3; reg = &timer600; break;
+    case 0xC0100204: idx = 4; reg = &basic204; break;
+    case 0xC022F198: idx = 5; break;
+    case 0xC0201308: idx = 6; reg = &wake_ctrl; break;
+    case 0xC0400008: idx = 7; break;        /* traced only */
+    default:
+        return false;
+    }
+
+    bool handled = true;
+    if (type & MODE_WRITE) {
+        if (reg) {
+            *reg = value;
+        }
+        /* timer 6 control and CLOCK_ENABLE keep their usual side effects */
+        handled = (idx != 3 && idx != 7);
+    } else {
+        switch (idx) {
+        case 0: *ret = 0x400; break;
+        case 2: *ret = 1; break;
+        case 5: *ret = 0; break;
+        case 6: {
+            CPUState *cs = CPU(CURRENT_CPU);
+            bool pending = eos_state->irq_id || (cs->interrupt_request & CPU_INTERRUPT_HARD);
+            *ret = (wake_ctrl & ~0x10u) | (pending ? 0x10 : 0);
+            if (!pending) {
+                /* takes effect at the end of this TB: the poll loop sleeps until an interrupt */
+                cpu_interrupt(cs, CPU_INTERRUPT_HALT);
+            }
+            break;
+        }
+        case 7: handled = false; break;
+        default: *ret = *reg; break;
+        }
+    }
+
+    if (trace < 0) {
+        const char *env = getenv("QEMU_EOS_PM_TRACE");
+        trace = env && env[0] == '1';
+    }
+    if (trace && trace_count[idx]++ < 40) {
+        fprintf(stderr, "[PM1100D] %s 0x%08X %s 0x%X (pc %08X)\n", (type & MODE_WRITE) ? "W" : "R",
+                address, (type & MODE_WRITE) ? "<-" : "->", (type & MODE_WRITE) ? value : (handled ? *ret : 0),
+                CURRENT_CPU->env.regs[15]);
+    }
+    return handled;
+}
+
 unsigned int eos_handler(unsigned int address, unsigned char type, unsigned int value)
 {
+    static int is_1100d = -1;
+    if (is_1100d < 0) {
+        /* QEMU_EOS_PM_MODEL=0: previous behaviour (A/B measurements) */
+        const char *env = getenv("QEMU_EOS_PM_MODEL");
+        is_1100d = strcmp(eos_state->model->name, MODEL_NAME_1100D) == 0 && !(env && env[0] == '0');
+    }
+    if (is_1100d) {
+        unsigned int ret = 0;
+        if (eos_pm_1100d(address, type, value, &ret)) {
+            return ret;
+        }
+    }
+
     EOSRegionHandler *handler = eos_find_handler(address);
 
     if(handler)
