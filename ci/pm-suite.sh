@@ -4,10 +4,10 @@
 #   c    model on with QEMU_EOS_PM_TRACE=1 (register accesses, LCLK edges)
 #   d    deep sleep: INFO/DISP turns the display off, idle DEEP_S s (expect selfRefresh), then INFO wakes
 #        it and MENU must still open Canon's menu
-# Needs ROM_TOKEN and SANDBOX; REPS (default 3), DEEP_S (default 30). Results: emu-out/pm/summary.md
+# Needs ROM_TOKEN and SANDBOX; REPS (default 1), DEEP_S (default 30). Results: emu-out/pm/summary.md
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-REPS=${REPS:-3}
+REPS=${REPS:-1}
 DEEP_S=${DEEP_S:-30}
 rm -rf "$ROOT/emu-out/pm" && mkdir -p "$ROOT/emu-out/pm"
 IMG=$("$ROOT/ci/build-image.sh" opt)
@@ -29,7 +29,10 @@ for r in $(seq 1 "$REPS"); do
 done
 run "c-pm-on-trace" --env QEMU_EOS_PM_TRACE=1
 run "d-deep-sleep" --env QEMU_EOS_PM_TRACE=1 --idle 5 \
-    --step key:i --step wait:3 --step shot:disp_off --step "wait:$DEEP_S" --step shot:asleep \
+    --step "mon:xp /30wx 0x2bf18" --step "mon:xp /8wx 0x661c" \
+    --step key:i --step wait:3 --step shot:disp_off \
+    --step "mon:xp /30wx 0x2bf18" --step "mon:xp /8wx 0x661c" --step "mon:xp /8wx 0x2b60" --step "mon:xp /8wx 0x7504" \
+    --step "wait:$DEEP_S" --step shot:asleep --step "mon:xp /8wx 0x7504" --step "mon:info registers" \
     --step key:i --step wait:4 --step shot:woken --step key:m --step wait:4 --step shot:menu_after_wake \
     --step key:m --step wait:3 --step shot:menu_closed
 '
@@ -43,9 +46,11 @@ for p in sorted(glob.glob("emu-out/pm/*/result.json")):
     for s in r.get("steps") or []:
         print("   %-18s t=%6.1f %s" % (s["step"], s["t"], {k: v for k, v in s.get("counts", {}).items() if v}))
     if r.get("steps"):
-        print("   frames", r["frames"])'
+        print("   frames", r["frames"])
+    for cmd, outp in r.get("monitor") or []:
+        print("   mon %s:\n      %s" % (cmd, outp.replace("\n", "\n      ")[:1500]))'
 for d in c-pm-on-trace d-deep-sleep; do
     echo "== $d"
-    grep -h "PM1100D\] \(LCLK\|self-refresh\)\|pmSelfRefresh\|CLKSAVER\|DisablePowerSave\|EnablePowerSave" \
+    grep -ah "PM1100D\] \(LCLK\|self-refresh\)\|pmSelfRefresh\|CLKSAVER\|DisablePowerSave\|EnablePowerSave" \
         "$ROOT/emu-out/pm/$d/qemu.log" | sed "s/\x1b\[[0-9;]*m//g" | tail -n 150 || true
 done

@@ -937,6 +937,9 @@ static int cfdma_write_data(CFState *cf);
 static void cfdma_trigger_interrupt(void);
 
 
+/* 1100D selfRefresh (eos_pm_1100d): all module clocks gated, DIGIC timers stopped until a wake */
+static bool eos_clocks_gated;
+
 static void eos_interrupt_timer_body(void)
 {
     {
@@ -954,7 +957,7 @@ static void eos_interrupt_timer_body(void)
         /* Clocks gated by the 1100D selfRefresh (CLOCK_ENABLE = 0): the DIGIC timers, the DryOS tick
          * and the HPTimers stand still; other interrupts (MPU, keys) still arrive and wake the CPU.
          * Always 0 on the other models. */
-        const bool gated = eos_state->clocks_gated;
+        const bool gated = eos_clocks_gated;
 
         if (!gated)
         {
@@ -2490,9 +2493,9 @@ static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int 
         if (reg) {
             *reg = value;
         }
-        if (idx == 7 && !value != !eos_state->clocks_gated) {
+        if (idx == 7 && !value != eos_clocks_gated) {
             int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-            eos_state->clocks_gated = !value;
+            eos_clocks_gated = !value;
             if (!value) {
                 sr_start_ns = now;
                 wake_irq = 0;

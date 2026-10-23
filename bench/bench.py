@@ -237,7 +237,8 @@ def main():
     ap.add_argument("--count", action="append", default=[], help="count lines of qemu.log containing this text")
     ap.add_argument("--step", action="append", default=[],
                     help="after the idle window, in order: key:K (sendkey K), wait:S, shot:NAME (frame hash + "
-                         "PNG); --count texts are also counted per segment between steps")
+                         "PNG), mon:CMD (monitor command, output kept); --count texts are also counted per "
+                         "segment between steps")
     a = ap.parse_args()
 
     cam = CAMS[a.cam]
@@ -335,6 +336,8 @@ def main():
                 mon.cmd("sendkey " + arg)
             elif kind == "wait":
                 time.sleep(float(arg))
+            elif kind == "mon":         # e.g. mon:xp /8wx 0x2b60 (guest state, kept in result.json)
+                res.setdefault("monitor", []).append([arg, mon.cmd(arg).strip()])
             elif kind == "shot":
                 _, hs, _, w, h, px = scr.grab()
                 res["frames"][arg] = hs
