@@ -23,6 +23,18 @@ target camera: EOS M (fw 2.0.2).
 | 5 | 4000D model (branch `emu/4000d`) | 4000D fw 1.1.0 boots Canon firmware to the shooting screen; MENU/arrow scenarios pass; CI smoke test `ci/smoke.sh IMAGE 4000D`. Fixes vs the 1300D: 16 MiB ROM1, no ROM0, boot block overlaid at hivecs, flash ID `C2 25 38`, RTC adjust `0x31`. See `docs/models/4000D.md` |
 | 3 | partly | plugin side done in phase 2 (translation-time inline counters); DryOS task-switch trace still `-d tasks` |
 
+## Camera profiles (modular emulation)
+Goal: emulating a new camera means adding one profile directory, not editing shared code and scripts.
+- `cams/<CAM>/`: hardware parameters (memory map, ROM layout, interrupts, MPU registers; today in `model_list.c`),
+  behaviour hooks (flash ID, JPEG core, power management / deep sleep, capture) as functions registered on the
+  model instead of `strcmp(model->name, ...)` checks in shared code, MPU spells and button codes, test data
+  (expected screens, scenario keys, readiness markers, ROM package version).
+- Shared code (`hw/eos/*.c`, `ci/smoke.sh`, `bench/*.py`) reads the profile; no per-camera `case` statements.
+- Penumbra side: `platform/<CAM>/emulation.*` holds the ML-specific values (DryosDebugMsg address, power-save
+  counter, scenarios to run); its `ci/qemu/run_cam.sh` reads it.
+- Order: after the 4000D deep-sleep and capture work lands (both written as per-camera hooks), migrate 1100D,
+  4000D, EOSM, then the other upstream models.
+
 ## MCP server (phase 4)
 Python (official `mcp` SDK), stdio for local agents, optional streamable HTTP. Talks to QEMU via QMP, the GDB stub and
 the monitor; one session = one emulated camera.
