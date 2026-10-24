@@ -67,8 +67,12 @@ SerialFlashState *serial_flash_init(const char *filename, size_t size)
         }
         fclose(f);
     } else {
-        fprintf(stderr, "Could not open %s\n", filename);
-        exit(1);
+        /* No dump (the serial flash is not part of the ROM0/ROM1 dumps and not every owner has it):
+         * start from an erased chip instead of refusing to boot. Canon's code then finds no valid
+         * data there (e.g. no stored settings or calibration) and has to cope, as after a repair. */
+        fprintf(stderr, "[EOS] %s not found: serial flash starts erased (0xFF), size=0x%X\n",
+                filename, (int) size);
+        memset(sf->data, 0xFF, size);
     }
     
     return sf;
