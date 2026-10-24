@@ -5,9 +5,10 @@ emulated SD card**, with Canon's own EXIF (exposure time, aperture, ISO, exposur
 CR2 (RAW quality on the card image); 4000D: a JPEG. CI: `ci/smoke.sh` presses the shutter on both cameras and
 reads the card after QEMU exits (`bench/card.py`).
 
-Code: `hw/eos/capture.c` (generic) with the per-camera data in `hw/eos/cams/capture_1100d.c` and
-`capture_4000d.c` (`struct capture_profile`, `capture.h`), selected by `eos_model_desc.capture` in
-`model_list.c` (NULL = no capture emulation, the other cameras are unchanged); small hooks in `mpu.c` (keys,
+Code: `hw/eos/capture.c` (generic) with the per-camera data in the camera profiles,
+`hw/eos/cams/1100D/capture.c` and `hw/eos/cams/4000D/capture.c` (`struct capture_profile`, `capture.h`),
+selected by `eos_model_desc.capture` in the profile's `model.inc.c` (NULL = no capture emulation, the other
+cameras are unchanged; `docs/models/PROFILES.md`); small hooks in `mpu.c` (keys,
 MPU traffic), `eos.c` (interrupt enable, GPIO) and `engine.c` (JPEG core registers, EDMAC output data, HEAD
 timer start, deterministic dark frame).
 

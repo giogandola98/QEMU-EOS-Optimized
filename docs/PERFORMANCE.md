@@ -8,7 +8,7 @@ the shared Forgejo runner (`linux-podman`, 4 vCPUs, 4 GiB). Reference numbers: `
 | File | What |
 |---|---|
 | `bench/bench.py` | One run: boot to the Canon GUI, scripted scenarios, idle window, metrics → `result.json` (also the CI smoke test) |
-| `bench/expected.json` | Pixel hashes of the GUI and scenario frames (smoke test reference; ML-Optimized's old CI screenshot is pixel-identical) |
+| `hw/eos/cams/<CAM>/test/bench.json` | Per camera: scenarios, log markers and the pixel hashes of the GUI and scenario frames (`"expected"`, smoke test reference; ML-Optimized's old CI screenshot is pixel-identical). See `docs/models/PROFILES.md` |
 | `bench/microbench.py` + `busyloop.S` | ROM-free TCG speed: 600 M guest instructions on `-M versatilepb`, per plugin configuration |
 | `bench/parallel.sh` | Same two runs one after the other, then at the same time |
 | `ci/bench-suite.sh`, `bench/report.py` | Whole suite (workflow `bench`, manual dispatch) → `summary.md` / `summary.json` artifact |
@@ -83,4 +83,4 @@ handlers would need a `VMStateDescription`, and the legacy `sd_init()` card woul
     # one run by hand, inside the image, ROMs in ./roms/1100D/
     podman run --rm --tmpfs /tmp -v "$PWD":/work -v "$PWD/roms":/roms:ro -w /work IMAGE \
         python3 -I bench/bench.py --rom-dir /roms --out emu-out/run1 --plugin /opt/qemu-eos/plugins/libwakeups.so \
-            --expect bench/expected.json
+            --expect

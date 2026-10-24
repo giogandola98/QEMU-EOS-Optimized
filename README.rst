@@ -2,6 +2,10 @@
 QEMU README
 ===========
 
+This tree is QEMU-EOS-Optimized, a fork of qemu-eos (QEMU 4.2.1 with Canon EOS camera emulation, ``hw/eos/``).
+Project plan and status: ``docs/PLAN.md``. Each emulated camera has a profile in ``hw/eos/cams/<CAM>/``;
+how to add one: ``docs/models/PROFILES.md``.
+
 QEMU is a generic and open source machine & userspace emulator and
 virtualizer.
 

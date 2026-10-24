@@ -36,6 +36,11 @@ Goal: emulating a new camera means adding one profile directory, not editing sha
   counter, scenarios to run); its `ci/qemu/run_cam.sh` reads it.
 - Order: after the 4000D deep-sleep and capture work lands (both written as per-camera hooks), migrate 1100D,
   4000D, EOSM, then the other upstream models.
+- **Status (branch `emu/profiles`):** `hw/eos/cams/{1100D,4000D,EOSM}/` hold their model entry (`model.inc.c`),
+  hooks (`pm.c`, `capture.c`) and test data (`test/bench.json`, `test/smoke.sh`); every former
+  `strcmp(model->name, ...)` in `eos.c`, `engine.c` and `mpu.c` is a field or `EOS_QUIRK_*` flag of the model
+  entry (the upstream models set theirs in `model_list.c`); `ci/smoke.sh` and `bench/bench.py` read the profile.
+  Pure refactor: same CI results. How to add a camera: [`docs/models/PROFILES.md`](models/PROFILES.md).
 
 ## MCP server (phase 4)
 Python (official `mcp` SDK), stdio for local agents, optional streamable HTTP. Talks to QEMU via QMP, the GDB stub and
