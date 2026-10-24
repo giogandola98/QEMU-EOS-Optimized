@@ -6,7 +6,7 @@ without them the firmware stops at start-up (RscMgr / PropertyAdmin asserts). Th
 flash is ML's sf_dump module. When only a RAM dump is at hand (ML "Dump RAM", 256 MiB, e.g. RAM4.BIN),
 the packages can be taken from there, because Canon loads both into RAM at start-up and keeps them:
 
-  package  flash address  flash region  RAM copy in a 2.0.2 dump   (region sizes: ROM 0xFF0C3570/0xFF0C35D0)
+  package  flash address  flash region  RAM copy in a 2.0.2 dump   (handles created at ROM 0xFF0C35AC / 0xFF0C360C)
   FIX      0x340000       0xC0000       0x00480000 (heap; found by its header, see below)
   TUNE     0x010000       0x330000      0x0FE00000 (fixed DRAM address, "DRAMAddr 0x4fe00000" in the log)
 

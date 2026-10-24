@@ -29,8 +29,8 @@ ROMs are not available. Camera profile: `hw/eos/cams/EOSM/` (`docs/models/PROFIL
 
    | What | Where | Behaviour |
    |---|---|---|
-   | FIX handle | `0xFF0C3570`: flash `0x340000`, 0x1000-byte sectors x 0xC0, one 0xC0000 slot | loaded into a heap buffer |
-   | TUNE handle | `0xFF0C35D0`: flash `0x10000`, 0x330 sectors, one 0x330000 slot | loaded to DRAM `0x4FE00000` (`DRAMAddr` in the log) |
+   | FIX handle | `0xFF0C35AC`: flash `0x340000`, 0x1000-byte sectors x 0xC0, one 0xC0000 slot | loaded into a heap buffer |
+   | TUNE handle | `0xFF0C360C`: flash `0x10000`, 0x330 sectors, one 0x330000 slot | loaded to DRAM `0x4FE00000` (`DRAMAddr` in the log) |
    | Package scan | `0xFF1207B0` | reads a 36-byte header per slot; word 0 `0x0000FFFF` = valid package (`0` = invalid), word 1 = size <= slot |
    | Load | `0xFF120D98` | copies `size` bytes to RAM and writes `0x00FFFFFF` into word 0 of the copy |
    | Small reads (< 512 bytes) | `0xFF139BCC` | READ (0x03) of 512 bytes, then each byte rebuilt as `in[i] << 4 \| in[i+1] >> 4`: the data arrives 4 bits late |
