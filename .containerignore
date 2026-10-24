@@ -7,3 +7,4 @@ bench
 emu-out
 docs/PLAN.md
 docs/PERFORMANCE.md
+hw/eos/cams/*/test

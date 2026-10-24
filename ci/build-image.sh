@@ -14,7 +14,8 @@ PROFILE=${1:-opt}
 cd "$ROOT"
 
 src_hash() {
-    { git ls-files -s -- . ':!ci' ':!bench' ':!.forgejo' ':!docs/PLAN.md' ':!docs/PERFORMANCE.md'
+    { git ls-files -s -- . ':!ci' ':!bench' ':!.forgejo' ':!docs/PLAN.md' ':!docs/PERFORMANCE.md' \
+          ':!hw/eos/cams/*/test/*'
       sha256sum ci/qemu/Containerfile .containerignore
       echo "$PROFILE"; } | sha256sum | cut -c1-12
 }

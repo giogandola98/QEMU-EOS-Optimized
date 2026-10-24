@@ -1,0 +1,17 @@
+{
+ "_comment": "4000D test data for bench/bench.py (docs/models/PROFILES.md)",
+ "debugmsg": "0xFE117178",
+ "_debugmsg": "DryosDebugMsg, docs/models/4000D.md (ROM pattern search)",
+ "scenarios": [["menu", ["m"]], ["menu_right", ["right"]], ["menu_close", ["m"]]],
+ "uart_markers": ["K422 READY", "[MC] PROP_GUI_STATE 0", "[STARTUP] startupInitializeComplete"],
+ "log_markers": ["GUI_Initialize", "DlgShootOlc.c LOCAL_DIALOG_REFRESH"],
+ "_expected": "frame name -> pixel hash (bench.py --expect): GUI, scenarios, smoke-test shots",
+ "expected": {
+  "gui": "3020be96d6c022b4",
+  "menu": "624dc28a2cee1b22",
+  "menu_right": "53c9cd61bfc6dcee",
+  "menu_close": "3020be96d6c022b4",
+  "display_off": "7d2e77298f503015",
+  "woken": "3020be96d6c022b4"
+ }
+}

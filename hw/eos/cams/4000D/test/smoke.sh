@@ -1,5 +1,6 @@
 # Smoke-test settings for the 4000D (sourced by ci/smoke.sh). EXTRA is eval-ed: keep it on ONE line.
-# Deep sleep (hw/eos/cams/pm_4000d.c): INFO turns the display off -> selfRefresh In/Out -> INFO wakes the
+# FW: ROM package version (canon-rom <CAM>-<FW>); OUT: results dir; EXTRA: bench.py arguments.
+# Deep sleep (hw/eos/cams/4000D/pm.c): INFO turns the display off -> selfRefresh In/Out -> INFO wakes the
 # shooting screen. "#1 out after 1" = the first sleep lasted 10-19 s, i.e. the timers stopped and only the
 # wake key ended it (without the clock gate the DryOS tick ends every sleep within 10 ms).
 FW=110; OUT=emu-out/smoke-4000D

@@ -17,7 +17,7 @@ set -euo pipefail
 run() {
     local name=$1; shift
     podman run $SANDBOX --tmpfs /tmp:rw,size=1g -v "$ROOT:/work" -v "$ROM_DIR:/roms:ro" -w /work "$IMG" \
-        python3 -I bench/bench.py --cam 1100D --rom-dir /roms --expect bench/expected.json --idle 20 \
+        python3 -I bench/bench.py --cam 1100D --rom-dir /roms --expect --idle 20 \
             --plugin /opt/qemu-eos/plugins/libwakeups.so --debugmsg --out "emu-out/pm/$name" --label "$name" \
             --count pmSelfRefresh --count "EnablePowerSave (Counter = 0)" --count "[PM]" --count "[PM1100D]" \
             --count "self-refresh #" --count "LCLK o" --count "CLKSAVER" \

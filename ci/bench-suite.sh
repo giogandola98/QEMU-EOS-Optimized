@@ -37,7 +37,7 @@ podman run $SANDBOX --tmpfs /tmp -v "$ROOT:/work" -w /work "$REF_IMG" \
 
 "$ROOT/ci/with-roms.sh" 1100D-105 bash -c '
 set -euo pipefail
-B="python3 -I bench/bench.py --cam 1100D --rom-dir /roms --expect bench/expected.json --idle 8"
+B="python3 -I bench/bench.py --cam 1100D --rom-dir /roms --expect --idle 8"
 V1=/tmp/p/libwakeups_v1.so
 V2=/opt/qemu-eos/plugins/libwakeups.so
 OLD="--env QEMU_EOS_MMIO_CACHE=0"           # original handler scan
@@ -62,7 +62,7 @@ done
 
 # (e) Parallel vs sequential pair of runs, timed inside one container.
 podman run $SANDBOX --tmpfs /tmp:rw,size=1g -v "$ROOT:/work" -v "$ROM_DIR:/roms:ro" -w /work "$OPT_IMG" \
-    bench/parallel.sh emu-out/bench --cam 1100D --rom-dir /roms --expect bench/expected.json --idle 8 \
+    bench/parallel.sh emu-out/bench --cam 1100D --rom-dir /roms --expect --idle 8 \
         --plugin $V2 || echo "parallel runs FAILED"
 '
 podman run $SANDBOX -v "$ROOT:/work" -w /work "$OPT_IMG" python3 -I bench/report.py emu-out/bench

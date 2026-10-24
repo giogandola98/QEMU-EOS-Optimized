@@ -36,21 +36,23 @@ import card     # noqa: E402  (SD card reader, bench/card.py)
 
 QEMU_EOS = os.environ.get("QEMU_EOS", "/opt/qemu-eos")
 
-# Per camera: scripted scenarios (name, keys) and markers expected in the UART log once the GUI is up.
-CAMS = {
-    "1100D": {
-        "debugmsg": "0xFF06C914",          # DryosDebugMsg, platform/1100D.105/stubs.S in ML-Optimized
-        "scenarios": [("menu", ["m"]), ("menu_right", ["right"]), ("menu_close", ["m"])],
-        "uart_markers": ["K288 READY", "[MC] PROP_GUI_STATE 0"],
-        "log_markers": ["GUI_Initialize", "DlgShootOlc.c LOCAL_DIALOG_REFRESH"],
-    },
-    "4000D": {
-        "debugmsg": "0xFE117178",          # DryosDebugMsg, docs/models/4000D.md (ROM pattern search)
-        "scenarios": [("menu", ["m"]), ("menu_right", ["right"]), ("menu_close", ["m"])],
-        "uart_markers": ["K422 READY", "[MC] PROP_GUI_STATE 0", "[STARTUP] startupInitializeComplete"],
-        "log_markers": ["GUI_Initialize", "DlgShootOlc.c LOCAL_DIALOG_REFRESH"],
-    },
-}
+# Camera profiles: hw/eos/cams/<CAM>/test/bench.json holds the scripted scenarios (name, keys), the
+# markers expected in the UART / DryosDebugMsg logs once the GUI is up, the DryosDebugMsg address and
+# the expected frame hashes (docs/models/PROFILES.md). Every profile with that file can be benchmarked.
+CAMS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hw", "eos", "cams")
+
+
+def load_cams():
+    cams = {}
+    for name in sorted(os.listdir(CAMS_DIR)):
+        path = os.path.join(CAMS_DIR, name, "test", "bench.json")
+        if os.path.isfile(path):
+            with open(path) as f:
+                cams[name] = json.load(f)
+    return cams
+
+
+CAMS = load_cams()
 
 
 class Monitor:
@@ -238,7 +240,9 @@ def main():
     ap.add_argument("--loadvm", default="", help="start from snapshot NAME (-loadvm; reuses --disk-dir)")
     ap.add_argument("--no-scenarios", action="store_true")
     ap.add_argument("--idle", type=float, default=10.0, help="idle window after the scenarios, s")
-    ap.add_argument("--expect", default="", help="JSON {frame_name: hash}: frames must match (smoke test)")
+    ap.add_argument("--expect", nargs="?", const="profile", default="",
+                    help="frames must match (smoke test): bare = the profile's \"expected\" hashes, or a "
+                         "JSON file {cam: {frame_name: hash}}")
     ap.add_argument("--poll", type=float, default=0.1)
     ap.add_argument("--stable", type=float, default=3.0, help="s unchanged = settled (boot)")
     ap.add_argument("--key-stable", type=float, default=1.0, help="s unchanged = settled (scenarios)")
@@ -260,7 +264,10 @@ def main():
     cam = CAMS[a.cam]
     os.makedirs(a.out, exist_ok=True)
     out = os.path.abspath(a.out)
-    expect = json.load(open(a.expect)).get(a.cam, {}) if a.expect else {}
+    if a.expect == "profile":
+        expect = cam.get("expected", {})
+    else:
+        expect = json.load(open(a.expect)).get(a.cam, {}) if a.expect else {}
     tmp = a.disk_dir or os.path.join("/tmp", "bench-%d" % os.getpid())
     if a.loadvm and not a.disk_dir:
         sys.exit("--loadvm needs --disk-dir with the disks that hold the snapshot")
