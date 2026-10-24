@@ -4,4 +4,5 @@ obj-y += ../eos/eos_ml_helpers.o ../eos/mpu.o ../eos/serial_flash.o
 obj-y += ../eos/dbi/logging.o ../eos/dbi/memcheck.o ../eos/dbi/debugmsg.o
 obj-y += ../eos/dbi/backtrace.o
 obj-y += ../eos/scnprintf.o
+obj-y += ../eos/cams/pm_4000d.o
 

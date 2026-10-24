@@ -2,6 +2,7 @@
 #define EOS_MODEL_LIST_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define MODEL_NAME_5D "5D"
 #define MODEL_NAME_400D "400D"
@@ -57,8 +58,15 @@
 
 enum { ram_extra_array_len = 2 };
 
+/* Per-camera power-management register model (PowerMgr idle loop, selfRefresh; hw/eos/pm.h).
+ * Called by eos_handler() before the regular MMIO handlers: true = access handled (*ret = read
+ * value), false = pass it on. NULL (most models): no PM model. */
+typedef bool (*eos_pm_handler_fn)(unsigned int address, unsigned char type, unsigned int value,
+                                  unsigned int *ret);
+
 struct eos_model_desc {
     const char * name;
+    eos_pm_handler_fn pm_handler;   /* model-specific only, not inherited from the DIGIC defaults */
 
     union
     {

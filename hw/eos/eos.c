@@ -28,6 +28,7 @@
 #include "hw/eos/eos_utils.h"
 #include "hw/eos/eos_bufcon_100D.h"
 #include "hw/eos/engine.h"
+#include "hw/eos/pm.h"
 
 #define IGNORE_CONNECT_POLL
 
@@ -948,8 +949,19 @@ static int cfdma_write_data(CFState *cf);
 static void cfdma_trigger_interrupt(void);
 
 
-/* 1100D selfRefresh (eos_pm_1100d): all module clocks gated, DIGIC timers stopped until a wake */
+/* selfRefresh (pm.h: eos_pm_1100d, eos_pm_4000d): all module clocks gated, DIGIC timers stopped until
+ * a wake */
 static bool eos_clocks_gated;
+
+void eos_pm_set_clocks_gated(bool gated)
+{
+    eos_clocks_gated = gated;
+}
+
+bool eos_pm_clocks_gated(void)
+{
+    return eos_clocks_gated;
+}
 
 static void eos_interrupt_timer_body(void)
 {
@@ -965,9 +977,9 @@ static void eos_interrupt_timer_body(void)
             return;
         }
 
-        /* Clocks gated by the 1100D selfRefresh (CLOCK_ENABLE = 0): the DIGIC timers, the DryOS tick
-         * and the HPTimers stand still; other interrupts (MPU, keys) still arrive and wake the CPU.
-         * Always 0 on the other models. */
+        /* Clocks gated by selfRefresh (CLOCK_ENABLE = 0, models with a PM model, pm.h): the DIGIC
+         * timers, the DryOS tick and the HPTimers stand still; other interrupts (MPU, keys) still
+         * arrive and wake the CPU. Always 0 on the other models. */
         const bool gated = eos_clocks_gated;
 
         if (!gated)
@@ -2487,7 +2499,7 @@ EOSRegionHandler *eos_find_handler(unsigned int address)
  * QEMU_EOS_PM_MODEL=0 disables
  * the model.
  */
-static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int value, unsigned int *ret)
+bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int value, unsigned int *ret)
 {
     static uint32_t clksel, lclk_mask, wake_ctrl, timer600 = 1, basic204;
     static unsigned int sr_count, wake_irq;
@@ -2587,15 +2599,18 @@ static bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int 
 
 unsigned int eos_handler(unsigned int address, unsigned char type, unsigned int value)
 {
-    static int is_1100d = -1;
-    if (is_1100d < 0) {
+    /* per-camera power-management model (model_list.c .pm_handler, pm.h) */
+    static eos_pm_handler_fn pm_handler;
+    static int pm_init;
+    if (!pm_init) {
         /* QEMU_EOS_PM_MODEL=0: previous behaviour (A/B measurements) */
         const char *env = getenv("QEMU_EOS_PM_MODEL");
-        is_1100d = strcmp(eos_state->model->name, MODEL_NAME_1100D) == 0 && !(env && env[0] == '0');
+        pm_handler = (env && env[0] == '0') ? NULL : eos_state->model->pm_handler;
+        pm_init = 1;
     }
-    if (is_1100d) {
+    if (pm_handler) {
         unsigned int ret = 0;
-        if (eos_pm_1100d(address, type, value, &ret)) {
+        if (pm_handler(address, type, value, &ret)) {
             return ret;
         }
     }
