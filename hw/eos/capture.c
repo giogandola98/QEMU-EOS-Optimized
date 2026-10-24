@@ -54,6 +54,7 @@ static struct
     int8_t shot_level[256];         /* placeholder level of each shot; the JPEG runs come in shot order,
                                      * possibly after the next release has started */
     int main_runs;                  /* full-size JPEG runs so far */
+    double first_stops;             /* exposure of the first shot (placeholder level reference) */
     int last_level;
     uint32_t jp_regs[0x400];        /* JP51 register writes */
 } cap = { .tv = 0x68, .av = 0x30, .iso = 0x48 };
@@ -115,23 +116,29 @@ static void mpu_switch(int sw, int on)
 }
 
 /* exposure in stops relative to 1/100 s, f/5.6, ISO 100 (for the placeholder's brightness) */
-static double exposure_stops(void)
+static double exposure_stops(int tv, int av, int iso)
 {
     /* Canon raw codes: Tv = 8 * log2(1/t) + 56, Av = 8 * (Av APEX) + 8, ISO 100 = 0x48, 8 per stop */
-    double t = (cap.tv - (8 * log2(100) + 56)) / 8.0;   /* positive: shorter */
-    double a = (cap.av - (8 * 2 * log2(5.6) + 8)) / 8.0; /* positive: smaller aperture */
-    double s = (cap.iso - 0x48) / 8.0;
+    double t = (tv - (8 * log2(100) + 56)) / 8.0;   /* positive: shorter */
+    double a = (av - (8 * 2 * log2(5.6) + 8)) / 8.0; /* positive: smaller aperture */
+    double s = ((iso ? iso : 0x48) - 0x48) / 8.0;
     return -t - a + s;
 }
 
-static void release_start(void)
+/* one release with the exposure the MPU latched when it was requested */
+static void release_start(int tv, int av, int iso)
 {
     const struct capture_profile *p = profile();
     uint8_t data[64];
 
     cap.shots++;
+    if (cap.shots == 1)
     {
-        int level = 118 + (int) lround(16 * exposure_stops());
+        cap.first_stops = exposure_stops(tv, av, iso);
+    }
+    {
+        /* placeholder level: mid gray for the first shot, 16 levels per stop from there */
+        int level = 128 + (int) lround(16 * (exposure_stops(tv, av, iso) - cap.first_stops));
         cap.shot_level[cap.shots % COUNT(cap.shot_level)] = MAX(MIN(level, 250), 5) - 128;
     }
     cap.release_edges = 0;
@@ -139,7 +146,7 @@ static void release_start(void)
     cap.exposing = 0;
     cap.bulb_end_pending = 0;
     CAP_LOG("shot %d: tv=0x%02X av=0x%02X iso=0x%02X ae=0x%02X mode=%d (%+.2f EV)\n",
-            cap.shots, cap.tv, cap.av, cap.iso, cap.ae, cap.mode, exposure_stops());
+            cap.shots, tv, av, iso, cap.ae, cap.mode, exposure_stops(tv, av, iso));
 
     mpu_simple_event(0x01);         /* EVENTID_RELEASE_ON */
     mpu_simple_event(0x0E);         /* EVENTID_RELEASE_START */
@@ -147,11 +154,11 @@ static void release_start(void)
     /* EVENTID_RELEASE_DATA_SW2ON: what the MPU is going to expose */
     assert(p->release_data_len <= sizeof(data));
     memset(data, 0, sizeof(data));
-    data[0] = cap.tv;
-    data[1] = cap.av;
-    data[2] = cap.tv;               /* (copies seen in other cameras' logs) */
-    data[3] = cap.av;
-    data[4] = cap.iso ? cap.iso : 0x48;    /* auto ISO: the MPU picks one (here ISO 100) */
+    data[0] = tv;
+    data[1] = av;
+    data[2] = tv;                   /* (copies seen in other cameras' logs) */
+    data[3] = av;
+    data[4] = iso ? iso : 0x48;     /* auto ISO: the MPU picks one (here ISO 100) */
     data[23] = 0x92;                /* tp: temperature */
     data[25] = 0x77;                /* po */
     if (p->eshut_offset)
@@ -161,6 +168,12 @@ static void release_start(void)
     }
     mpu_event(0x05, 0x02, data, p->release_data_len);
     mpu_kick();
+}
+
+
+static void release_request(void)
+{
+    release_start(cap.tv, cap.av, cap.iso);
 }
 
 static void release_end(void)
@@ -190,7 +203,7 @@ static void shutter_press(void)
 {
     mpu_switch(0x26, 1);
     mpu_simple_event(0x00);         /* EVENTID_METERING_START_SW1ON */
-    release_start();
+    release_request();
 }
 
 static void bulb_end(void)
@@ -354,7 +367,7 @@ static void remote_switch(const uint16_t *msg, int len)
     mpu_queue_spell(reply);
     if (sw2 && on)
     {
-        release_start();
+        release_request();
     }
     else if (sw2)
     {
@@ -651,7 +664,7 @@ static void jpcore_new_output(void)
         cap.main_runs++;
         cap.last_level = cap.shot_level[cap.main_runs % COUNT(cap.shot_level)] + 128;
     }
-    int level = cap.last_level ? cap.last_level : 118 + (int) lround(16 * exposure_stops());
+    int level = cap.last_level ? cap.last_level : 128;
     level = MAX(MIN(level, 250), 5);
     make_jpeg(MAX(width, 8), MAX(height, 8), level);
     CAP_LOG("JPEG %dx%d, level %d (%d bytes)\n", width, height, level, cap.jpeg_len);

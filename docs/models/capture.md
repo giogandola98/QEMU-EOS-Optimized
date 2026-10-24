@@ -24,7 +24,7 @@ timer start, deterministic dark frame).
 | readout | EDMAC#2 raw (`[CAPTURE] Generating a WxH dark frame`), `CapEnd`, `scsFinalReadoutDone` | existing EDMAC/PREPRO model; the raw frame is a fixed pseudo-random pattern around black (was Gaussian noise from `rand()`: slow, and different every run) |
 | shutter closed | `scsAfterReleaseDataCBR`, `cam event after data` | on the next falling edge of the release line: `EVENTID_AFTER_RELEASE_DATA` (`05 03`), `EVENTID_RELEASE_END` (`05 0f`) |
 | fencing / face detection | `[FB] START`, `[FB] FencingCompleteCBR` | Fencing_A/B/C (0xC9/0xD0/0xD1) fire once per operation: on the enable that starts it, not on DryOS' re-enable after the handler |
-| compression | `[TTJ] ... JpCoreCompleteCBR( size )`, `JPEG(4272,2848,..)` | JP51 `0x44` = 0x400 (done; was `rand()` on the 1100D), `0x24` = output size. The output (EDMAC connection 5) is a valid baseline grayscale JPEG of the size in JP51 `0x080` (height << 16, width), uniform level 118 + 16 × (exposure in stops vs 1/100 s, f/5.6, ISO 100), so bracketed frames differ. The firmware checks that it starts with `FF D8 FF DB`. Lossless runs (JP51 `0x004` low bits = 2, the CR2 raw) get 256 KiB of zeros |
+| compression | `[TTJ] ... JpCoreCompleteCBR( size )`, `JPEG(4272,2848,..)` | JP51 `0x44` = 0x400 (done; was `rand()` on the 1100D), `0x24` = output size. The output (EDMAC connection 5) is a valid baseline grayscale JPEG of the size in JP51 `0x080` (height << 16, width), uniform level: 128 for the first shot, 16 levels per stop of exposure difference from it (Tv, Av, ISO latched at the release), so bracketed frames differ. The firmware checks that it starts with `FF D8 FF DB`. Lossless runs (JP51 `0x004` low bits = 2, the CR2 raw) get 256 KiB of zeros |
 | file | `B:/DCIM/100EOS5D/IMG_nnnn.CR2 write done` | existing SD model |
 | SW2/SW1 off | `scsReleaseOff`, `cam event release end` | on key release: `05 04`, `05 0b`; while a release runs they are held back until its end (else `ERROR scsEventDispatch ... dwEventID=18`) |
 | remote release (ML `call("Release")`, PTP, ML `SW1()`/`SW2()`) | `Release`, `REMOTE_RELEASE_OK` | DIGIC → MPU `PROP_REMOTE_SW1` (`04 16`) / `PROP_REMOTE_SW2` (`04 17`): the MPU answers with the same property carrying 0 (the PTP layer reads it as the result; the value itself gives `REMOTE_RELEASE NG`) and plays SW1 on / the release / SW2 off / SW1 off |
@@ -58,4 +58,8 @@ write after the first release. F5..F8 queue the MPU messages listed in `$QEMU_EO
   4000D), no LiveView capture, no flash, no continuous drive, no mirror lockup, no dark-frame noise reduction
   beyond what the firmware does with the dummy frame.
 - Exposure in auto modes is whatever the MPU last reported (no metering); in M mode it is exactly what was set.
+- 4000D: back-to-back releases (ML HDR) are captured with the right exposures, but developing the overlapping
+  pictures to files stalls in about one run in three (TwoInTwoOut JPEG path: EDMAC/JPEG-core completions of
+  overlapping runs get attributed to the wrong run in the engine model); spaced shots
+  (intervalometer, single presses) are reliable. The 1100D develops back-to-back frames reliably.
 - Other cameras: `capture_profile = 0`, unchanged behaviour.
