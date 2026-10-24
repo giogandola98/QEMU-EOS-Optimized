@@ -23,6 +23,7 @@ target camera: EOS M (fw 2.0.2).
 | 5 | 4000D model (branch `emu/4000d`) | 4000D fw 1.1.0 boots Canon firmware to the shooting screen; MENU/arrow scenarios pass; CI smoke test `ci/smoke.sh IMAGE 4000D`. Fixes vs the 1300D: 16 MiB ROM1, no ROM0, boot block overlaid at hivecs, flash ID `C2 25 38`, RTC adjust `0x31`. See `docs/models/4000D.md` |
 | 5 | 4000D deep sleep (branch `emu/4000d-pm`) | Per-camera PM hook: `eos_model_desc.pm_handler` (`hw/eos/pm.h`), used by the 1100D (`eos_pm_1100d`) and the 4000D (`hw/eos/cams/pm_4000d.c`); smoke-test settings per camera in `ci/smoke/<CAM>.sh`. 4000D `selfRefresh` sleeps in a WFI with IRQs masked (no wake-flag poll), so the model only adds the clock gate: one sleep of ~17 s with the display off, woken by INFO (MPU 0x50), shooting screen back. See `docs/models/4000D.md` |
 | 5 | photo capture (branch `emu/shutter`) | 1100D and 4000D: a full shutter press (left Ctrl) or a remote release (ML `call("Release")`, `SW1`/`SW2`, PTP) runs Canon's shooting sequence to the end and writes the picture to the card (1100D CR2, 4000D JPEG) with Canon's EXIF; Tv/Av/ISO/EC that ML set are reported per shot (`[CAPTURE] shot n`, Canon's `iso:..,tv:..,av:..`, EXIF). MPU release events with exposure payload, release GPIO line → CAPREADY, fencing completions, JPEG core status/size and a placeholder JPEG whose level follows the exposure, periodic VD for long exposures, bulb end; deterministic dark frame. Per-camera data in `hw/eos/cams/capture_<cam>.c` (`eos_model_desc.capture`). `ci/smoke/<CAM>.sh` presses the shutter on both and checks the card (`bench/card.py`). No image processing, timing not physical. See `docs/models/capture.md` |
+| 5 | EOS M model (branch `emu/eosm`) | EOS M fw 2.0.2 boots Canon firmware to its GUI with the owner's ROMs; MENU, PLAY, Q, INFO, arrows, SET and half-shutter work; CI smoke test `ci/smoke.sh IMAGE EOSM` (profile `hw/eos/cams/EOSM/`). Fixes: missing `SFDATA.BIN` no longer exits (erased flash); the serial flash (FIX/TUNE property packages) rebuilt from a RAM dump of the camera (`test/sfdata_from_ram.py`, raw layout as ML's sf_dump); `EOS_QUIRK_I2C_TX_READY` for the audio IC init that hung start-up. Open: no LiveView image (display muted at boot, overlays on grey after a menu), deep sleep not reachable in normal use (power-save counter never 0, so no `pm.c`), capture. See `docs/models/EOSM.md` |
 | 3 | partly | plugin side done in phase 2 (translation-time inline counters); DryOS task-switch trace still `-d tasks` |
 
 ## Camera profiles (modular emulation)
@@ -42,7 +43,9 @@ Goal: emulating a new camera means adding one profile directory, not editing sha
   entry (the upstream models set theirs in `model_list.c`); `ci/smoke.sh` and `bench/bench.py` read the profile.
   Pure refactor: CI run 53 green with the same smoke results as main (run 52); locally, main and this branch
   give identical frames, log counts and card contents on the 1100D and 4000D, and identical start-up output on
-  every model. How to add a camera: [`docs/models/PROFILES.md`](models/PROFILES.md).
+  every model. How to add a camera: [`docs/models/PROFILES.md`](models/PROFILES.md). The EOS M profile was the
+  first one built this way (branch `emu/eosm`): one quirk and one opt-in `bench.json` key, no shared-code
+  name checks.
 
 ## MCP server (phase 4)
 Python (official `mcp` SDK), stdio for local agents, optional streamable HTTP. Talks to QEMU via QMP, the GDB stub and

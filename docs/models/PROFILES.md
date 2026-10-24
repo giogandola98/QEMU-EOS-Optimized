@@ -3,8 +3,14 @@
 A camera profile is one directory, `hw/eos/cams/<CAM>/`, with everything that is specific to one camera: its
 entry in the model table, its behaviour hooks and its test data. The shared code (`hw/eos/*.c`, `ci/smoke.sh`,
 `bench/*.py`) has no per-camera checks: it reads the fields of the model entry and the profile's test files.
-Profiles today: `1100D`, `4000D`, `EOSM`. The other upstream models still have their entry directly in
-`hw/eos/model_list.c`, with the same fields (see "Upstream models" below).
+Profiles today (the other upstream models still have their entry directly in `hw/eos/model_list.c`, with
+the same fields, see "Upstream models" below):
+
+| Profile | Firmware | Canon GUI | Hooks | CI smoke test | Notes |
+|---|---|---|---|---|---|
+| `1100D` | 1.0.5 | shooting screen, menus | `pm.c` (deep sleep), `capture.c` | boot, MENU, display off/selfRefresh/wake, shutter + card | validation camera |
+| `4000D` | 1.1.0 | shooting screen, menus | `pm.c` (deep sleep), `capture.c` | boot, MENU, display off/selfRefresh/wake, shutter + card | [`4000D.md`](4000D.md) |
+| `EOSM` | 2.0.2 | MENU, PLAY, Q, INFO screens and LiveView overlays (no LiveView image) | none (quirk `I2C_TX_READY`) | boot, MENU, PLAY, Q, INFO, half-shutter | needs `SFDATA.BIN`; [`EOSM.md`](EOSM.md) |
 
 ## Layout
 
@@ -65,6 +71,7 @@ Quirks (`enum eos_quirk`): one flag per hardware difference that is a single bra
 | `GPIO_11C_LOW` | GPIO `0x011C` (VIDEO CONNECT) reads 0 | 40D |
 | `GPIO_VSW_6000` | GPIO `0xF480` (VSW status) reads `0x6000` | 5D2, 50D |
 | `GPIO_F48C_HDMI` | GPIO `0xF48C` reads `0x4000000` (HDMI disconnected), skips Canon's system check program | 1300D, 4000D |
+| `I2C_TX_READY` | I2C `0xC0090000`: status bit 4 ("TX data ready") is set when a transmit starts, not only after the first byte | EOSM |
 
 When a new camera needs a different behaviour: if it is one more value or branch in an existing handler, add a
 field or a quirk (default 0 = old behaviour, document it here); if it is a model of its own (a register block, a
@@ -78,6 +85,7 @@ state machine), add a hook function in the profile, as `pm_handler` does.
 |---|---|
 | `debugmsg` | Address of Canon's DryosDebugMsg in this ROM (`--debugmsg` logs it through the plugin) |
 | `scenarios` | `[[name, [keys...]], ...]`: keys sent after the GUI is up; the settled frame is saved as `name` |
+| `gui_uart` | Optional: a UART line that must appear before the GUI frame is looked for, for cameras whose boot screen does not change when the GUI comes up (EOSM: the LCD stays off in LiveView). Without it the first settled frame (or the `gui` hash) is the GUI |
 | `uart_markers` | Strings that must appear on the UART once the GUI is up (e.g. `K422 READY`) |
 | `log_markers` | Strings expected in the DryosDebugMsg log (reported, not required) |
 | `expected` | Frame name -> pixel hash (`gui`, the scenarios, the smoke test's `shot:` steps); checked with `--expect` |
@@ -111,7 +119,9 @@ state machine), add a hook function in the profile, as `pm_handler` does.
    `profile.h`. Comments say *why* (which ROM routine waits for what); never copy Canon code, only addresses and
    observed behaviour.
 4. **ROMs.** Upload the dumps as package `<CAM>-<FW>` to the private registry and add their MD5 to
-   `ci/rom-md5.txt`.
+   `ci/rom-md5.txt`. DIGIC 5 cameras with a serial flash (`serial_flash_size`) also need `SFDATA.BIN` (ML's
+   `sf_dump`); without it the flash starts erased and Canon's start-up usually stops at its property
+   packages (the EOS M one was rebuilt from a RAM dump, `docs/models/EOSM.md`).
 5. **Test data.** `test/bench.json` (run `bench.py` once without `--expect` to get the frame hashes, check the
    PNGs) and `test/smoke.sh`; add a step `ci/smoke.sh "$(cat .image)" <CAM>` to `.forgejo/workflows/ci.yml`.
 6. **Docs.** `docs/models/<CAM>.md`: memory map, what had to be fixed and why, debug addresses, open questions.
