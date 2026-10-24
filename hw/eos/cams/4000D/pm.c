@@ -1,6 +1,6 @@
 /*
  * Canon EOS 4000D 1.1.0: power management (PowerMgr idle loop and selfRefresh deep sleep).
- * Selected by eos_model_desc.pm_handler (model_list.c); see hw/eos/pm.h and docs/models/4000D.md.
+ * Selected by eos_model_desc.pm_handler (model.inc.c); see hw/eos/pm.h and docs/models/4000D.md.
  *
  * PowerMgr task (ROM 0xFE289544), mode 2 ("power save", Canon's counter at 0):
  *   0xC0400008 bit1 set (image-engine clock LCLK on): if the LCLK client mask 0xC0F01004 == 0x400,
@@ -33,6 +33,7 @@
 #include "hw/core/cpu.h"
 #include "hw/eos/eos.h"
 #include "hw/eos/pm.h"
+#include "profile.h"
 
 #define PM4000D_CLOCK_ENABLE    0xC0400008      /* bit1 = LCLK; 0 = all module clocks off (selfRefresh) */
 

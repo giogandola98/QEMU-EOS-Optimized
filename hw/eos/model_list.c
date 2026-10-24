@@ -1,7 +1,48 @@
 #include <stddef.h>
 #include "model_list.h"
-#include "pm.h"
-#include "capture.h"
+
+/* Camera profiles (docs/models/PROFILES.md): each hw/eos/cams/<CAM>/ declares its hooks in profile.h
+ * and holds its table entry in model.inc.c, included below at its place in the DIGIC group. */
+#include "cams/1100D/profile.h"
+#include "cams/4000D/profile.h"
+#include "cams/EOSM/profile.h"
+
+#define ARRAY_COUNT(x) ((int)(sizeof(x) / sizeof((x)[0])))
+
+/* ADC readings of upstream models without a profile directory (eos_handle_adc) */
+
+/* EOSM3, EOSM10 (DIGIC 6 ADC, by channel): values from Ant123's camera (M3) */
+static const uint32_t adc_values_EOSM3[] = {
+    0x0000de40, 0x00008c00, 0x00008300, 0x00003ca0,
+    0x00003eb0, 0x00003f00, 0x0000aa90, 0x00000050,
+    0x00003c20, 0x0000fd60, 0x0000f720, 0x00000030,
+    0x00008a80, 0x0000a440, 0x00000020, 0x00000030,
+    0x00000030, 0x00008900, 0x0000fd60, 0x0000fed0,
+    0x0000fed0, 0x00000310, 0x00000020, 0x00000020,
+    0x00000020, 0x00000020, 0x00000010, 0x00000000
+};
+
+/* A1100 (digic 2 - 5 P&S style, each ADC is half word, but fw reads full word and shifts/masks):
+ * representative values from d10, channel usage seems
+ * mostly consistent for digic 2-5, but valid voltage
+ * may vary and AA battery cams don't have tbat and
+ * may use different order for temps
+ * see https://chdk.setepontos.com/index.php?topic=10385.msg102943#msg102943 */
+static const uint32_t adc_values_A1100[] = {
+   0,   // channel  0 0xc0900040 0 0x0
+   1,   // channel  1 0xc0900042 1 0x1
+// 803, // channel  2 0xc0900044 803 0x323 < vbat ~4.037v (from LiPo battery D10)
+   497, // channel  2 value from A540 ~2.215v (2x AA battery cam like A1100)
+   471, // channel  3 0xc0900046 471 0x1d7 < tccd ~15c
+   448, // channel  4 0xc0900048 448 0x1c0 < topt ~13c
+   422, // channel  5 0xc090004a 422 0x1a6 < tbat ~ 17c
+   1,   // channel  6 0xc090004c 1 0x1
+   1,   // channel  7 0xc090004e 1 0x1
+   1,   // channel  8 0xc0900050 1 0x1
+   1,   // channel  9 0xc0900052 1 0x1
+   565, // channel 10 0xc0900054 565 0x235
+   1,   // channel 11 0xc0900056 1 (USB not present) - 524 0x20c (USB present)
+};
 
 struct eos_model_desc eos_model_list[] = {
 /*************************** DIGIC II/III******************************/
@@ -56,6 +97,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_400D,
+        .quirks                 = EOS_QUIRK_RTC_REG0_0C,
         .digic_version          = 3,
         .ram_size               = 0x08000000,   /* 128MB */
         .card_led_address       = 0xC0220000,
@@ -64,6 +106,8 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_40D,
+        .mpu_spells             = MODEL_NAME_50D,
+        .quirks                 = EOS_QUIRK_GPIO_11C_LOW | EOS_QUIRK_RTC_NIBBLE_SWAP,
         .digic_version          = 3,
         .ram_size               = 0x10000000,   /* 256MB */
         .current_task_addr      = 0x22E00,
@@ -82,6 +126,8 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_1000D,
+        .mpu_spells             = MODEL_NAME_450D,
+        .button_codes           = MODEL_NAME_450D,
         .digic_version          = 3,
         .current_task_addr      = 0x352C0,
         .ram_size               = 0x04000000,   /* only 64MB */
@@ -135,6 +181,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_50D,
+        .quirks                 = EOS_QUIRK_GPIO_VSW_6000 | EOS_QUIRK_RTC_NIBBLE_SWAP,
         .digic_version          = 4,
         .rom0_size              = 0x00400000,   /* 4MB */
         .rom1_size              = 0x00800000,   /* 8MB */
@@ -152,6 +199,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_5D2,
+        .quirks                 = EOS_QUIRK_GPIO_VSW_6000 | EOS_QUIRK_RTC_NIBBLE_SWAP,
         .digic_version          = 4,
         .rom0_size              = 0x00400000,   /* 4MB */
         .rom1_size              = 0x00800000,   /* 8MB */
@@ -186,6 +234,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_7D,
+        .init_hook              = eos_init_7D,     /* boot flag 0x24 = 0: IPC off */
         .digic_version          = 4,
         .ram_size               = 0x20000000,   /* 512MB */
         .card_led_address       = 0xC022D06C,
@@ -210,17 +259,11 @@ struct eos_model_desc eos_model_list[] = {
         .dedicated_movie_mode   = 1,
     },
     {
-        .name                   = MODEL_NAME_1100D,
-        .pm_handler             = eos_pm_1100d, /* PowerMgr idle loop + selfRefresh (eos.c) */
-        .capture                = &capture_1100d, /* shutter release (cams/capture_1100d.c) */
-        .digic_version          = 4,
-        .ram_size               = 0x08000000,   /* 128MB */
-        .current_task_addr      = 0x1A2C,
-        .rtc_time_correct       = 0x8D,
-        .dedicated_movie_mode   = 1,
+#include "cams/1100D/model.inc.c"
     },
     {
         .name                   = MODEL_NAME_1200D,
+        .mpu_spells             = MODEL_NAME_60D,  /* boots the GUI */
         .digic_version          = 4,
         .ram_size               = 0x10000000,   /* 256MB */
         .firmware_start         = 0xFF0C0000,
@@ -231,6 +274,11 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_1300D,
+        .mpu_spells             = MODEL_NAME_600D,
+        .button_codes           = MODEL_NAME_1200D,
+        .flash_id               = 0x003925C2,      /* C2 25 39 */
+        .quirks                 = EOS_QUIRK_JPCORE_READY | EOS_QUIRK_JPCORE_IRQ_DONE |
+                                  EOS_QUIRK_GPIO_F48C_HDMI,
         .digic_version          = 4,
         .ram_size               = 0x10000000,   /* 256MB */
         .rom0_size              = 0x02000000,   /* 32MB */
@@ -252,33 +300,16 @@ struct eos_model_desc eos_model_list[] = {
       //.imgpowdet_register_bit = 0x00080000,   /* register and bit checked to print that message */
     },
     {
-        /* EOS 4000D / Rebel T100 / 3000D, fw 1.1.0, model ID 0x422. DIGIC 4+ like the 1300D, whose
-         * values are reused unless noted (starting point: the 2000D sketch in qemu-eos branch
-         * 2000d_test by stephen-e). See docs/models/4000D.md. */
-        .name                   = MODEL_NAME_4000D,
-        .pm_handler             = eos_pm_4000d, /* PowerMgr idle loop + selfRefresh (cams/pm_4000d.c) */
-        .capture                = &capture_4000d, /* shutter release (cams/capture_4000d.c) */
-        .digic_version          = 4,
-        .ram_size               = 0x10000000,   /* 256MB */
-        .rom0_size              = 0,            /* unpopulated: the dump is a 4-byte bus pattern */
-        .rom1_size              = 0x01000000,   /* 16MB; the 32MB dump holds two identical copies */
-        .firmware_start         = 0xFF0C0000,   /* ROMBASEADDR; the bootloader jumps to the FE0C0000 mirror */
-        .rom1_hivecs_offset     = 0x00010000,   /* bootloader vectors point to 0xFFFF0040... */
-        .dryos_timer_id         = 1,
-        .dryos_timer_interrupt  = 0x09,
-        .mpu_request_register   = 0xC022D0C4,
-        .mpu_request_bitmask    = 0x00100000,
-        .mpu_status_register    = 0xC022F484,
-        .current_task_addr      = 0x30978,      /* -d tasks names all tasks (1300D: 0x31170) */
-        .sd_driver_interrupt    = 0x4B,
-        .sd_dma_interrupt       = 0x32,
-        .uart_rx_interrupt      = 0x38,
-        .rtc_time_correct       = 0x31,         /* PROP_RTC in this ROM (log: "0xfd ---> 0x31" with 0xFD) */
-        .rtc_cs_register        = 0xC022D0B8,
-        .dedicated_movie_mode   = 1,
+#include "cams/4000D/model.inc.c"
     },
     {
         .name                   = MODEL_NAME_A1100,
+        .quirks                 = EOS_QUIRK_FLASH_CTRL_RO | EOS_QUIRK_DISP_LINE_DOUBLE | EOS_QUIRK_RTC_PS |
+                                  EOS_QUIRK_PS_IS | EOS_QUIRK_PS_KEYS | EOS_QUIRK_SD_ACMD41_REPLAY |
+                                  EOS_QUIRK_SD_IRQ_EN_ONLY | EOS_QUIRK_JPCORE_READY | EOS_QUIRK_JPCORE_IRQ_DONE,
+        .adc_ps_values          = adc_values_A1100,
+        .adc_ps_count           = ARRAY_COUNT(adc_values_A1100),
+        .adc_ps_battery         = 0x2024F,         /* seen on an A540 with 2xAA at 2.6 V (LiPo at 4.2 V: 0x2033C) */
         .digic_version          = 4,
         .rom0_size              = 0x0,     /* A1100 has only one ROM */
         .rom1_size              = 0x400000,     /* 4MB */
@@ -356,6 +387,7 @@ struct eos_model_desc eos_model_list[] = {
         /* started on request on photo taking, raw develop and others;
          * see EekoBltDmac, Eeko WakeUp; runs Thumb-2 code */
         .name                   = MODEL_NAME_5D3eeko,
+        .init_hook              = eos_init_5D3eeko,    /* Eeko RAM images, start in Thumb at 0 */
         .digic_version          = 50,           /* hack to get an empty configuration */
         .ram_size               = 0x00100000,   /* unknown, mapped to 0xD0288000 on main CPU*/
         .ram_extra_addr[0]      = 0x01E00000,   /* mapped to the same address on main CPU */
@@ -393,6 +425,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_650D,
+        .mpu_spells             = MODEL_NAME_700D,
         .digic_version          = 5,
         .ram_size               = 0x10000000,   /* 256MB */
         .current_task_addr      = 0x233D8,
@@ -403,6 +436,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_700D,
+        .button_codes           = MODEL_NAME_650D,
         .digic_version          = 5,
         .ram_size               = 0x10000000,   /* 256MB */
         .current_task_addr      = 0x233DC,
@@ -413,18 +447,11 @@ struct eos_model_desc eos_model_list[] = {
         .dedicated_movie_mode   = 0,
     },
     {
-        .name                   = MODEL_NAME_EOSM,
-        .digic_version          = 5,
-        .ram_size               = 0x10000000,   /* 256MB */
-        .current_task_addr      = 0x3DE78,
-        .card_led_address       = 0xC022C188,
-        .serial_flash_size      = 0x800000,
-        .rtc_cs_register        = 0xC022C0C4,
-        .rtc_time_correct       = 0x98,
-        .dedicated_movie_mode   = 0,
+#include "cams/EOSM/model.inc.c"
     },
     {
         .name                   = MODEL_NAME_EOSM2,
+        .button_codes           = MODEL_NAME_EOSM,
         .digic_version          = 5,
         .rom0_size              = 0x01000000,   /* 16MB */
         .ram_size               = 0x10000000,   /* 256MB */
@@ -581,6 +608,10 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_EOSM3,
+        .init_hook              = eos_init_EOSM3,  /* ROM patches (TIO, asserts) */
+        .adc_values             = adc_values_EOSM3,
+        .adc_count              = ARRAY_COUNT(adc_values_EOSM3),
+        .quirks                 = EOS_QUIRK_DISP_BMP_YUV8B | EOS_QUIRK_DISP_BMP_PAD16 | EOS_QUIRK_UART_TIO_KEEP,
         .digic_version          = 6,
         .ram_size               = 0x20000000,   /* 512MB? */
         .firmware_start         = 0xFC000000,
@@ -592,6 +623,10 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_EOSM10,
+        .init_hook              = eos_init_EOSM10, /* enable TIO */
+        .adc_values             = adc_values_EOSM3,
+        .adc_count              = ARRAY_COUNT(adc_values_EOSM3),
+        .quirks                 = EOS_QUIRK_I2C_RANDOM,
         .digic_version          = 6,
         .ram_size               = 0x20000000,   /* 512MB? */
         .firmware_start         = 0xFC000000,
@@ -637,6 +672,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_200D,
+        .init_hook              = eos_init_200D,   /* copy 0xE11C11C0 -> 0xDF002800 */
         .digic_version          = 7,
         .ram_size               = 0x20000000,   /* 512MB */
         .card_led_address       = 0xD208016C,   /* WLAN LED 0xD2080190 */
@@ -677,6 +713,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_EOSM5,
+        .init_hook              = eos_init_EOSM5,  /* enable TIO on both DryOS cores */
         .digic_version          = 7,
         .firmware_start         = 0xE0000000,
         .ram_size               = 0x40000000,   /* not yet known */
@@ -711,6 +748,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_EOSM50,
+        .quirks                 = EOS_QUIRK_DISP_BMP_YUV8B,
         .digic_version          = 8,
         .ram_size               = 0x40000000,   // 1GB
         .card_led_address       = 0xD01300E4,
@@ -750,6 +788,7 @@ struct eos_model_desc eos_model_list[] = {
     },
     {
         .name                   = MODEL_NAME_EOSRP,
+        .quirks                 = EOS_QUIRK_DISP_BMP_YUV8B,
         .digic_version          = 8,
         .ram_size               = 0x40000000,   /* unknown. assuming 1GB for now */
         .card_led_address       = 0xD01300D4,

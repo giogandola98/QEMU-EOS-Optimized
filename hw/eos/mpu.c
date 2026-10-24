@@ -687,6 +687,33 @@ unsigned int eos_handle_mreq(unsigned int parm, unsigned int address, unsigned c
 
 #include "mpu_spells/button_codes.h"
 
+/* button code tables by name; a model uses the one named by its .button_codes, else its own */
+static const struct {
+    const char *name;
+    int *codes;
+} mpu_button_sets[] = {
+#define MPU_BUTTON_CODES(cam) { #cam, button_codes_##cam }
+    MPU_BUTTON_CODES(100D),
+    MPU_BUTTON_CODES(1100D),
+    MPU_BUTTON_CODES(1200D),
+    MPU_BUTTON_CODES(450D),
+    MPU_BUTTON_CODES(40D),
+    MPU_BUTTON_CODES(500D),
+    MPU_BUTTON_CODES(550D),
+    MPU_BUTTON_CODES(50D),
+    MPU_BUTTON_CODES(5D2),
+    MPU_BUTTON_CODES(5D3),
+    MPU_BUTTON_CODES(600D),
+    MPU_BUTTON_CODES(60D),
+    MPU_BUTTON_CODES(6D),
+    MPU_BUTTON_CODES(650D),
+    MPU_BUTTON_CODES(70D),
+    MPU_BUTTON_CODES(7D),
+    MPU_BUTTON_CODES(EOSM),
+    MPU_BUTTON_CODES(200D),
+#undef MPU_BUTTON_CODES
+};
+
 static int *button_codes = 0;
 
 /* http://www.marjorie.de/ps2/scancode-set1.htm */
@@ -1220,45 +1247,43 @@ static void mpu_check_duplicate_spells(void)
     }
 }
 
+/* MPU init spell sets by name (mpu_spells/<name>.h). A model uses the set named by its
+ * .mpu_spells (e.g. the 1100D and 1200D boot the GUI with the 60D spells), else its own name. */
+static const struct {
+    const char *name;
+    struct mpu_init_spell *spells;
+    int count;
+} mpu_spell_sets[] = {
+#define MPU_SPELL_SET(cam) { #cam, mpu_init_spells_##cam, COUNT(mpu_init_spells_##cam) }
+    MPU_SPELL_SET(5D2),
+    MPU_SPELL_SET(5D3),
+    MPU_SPELL_SET(6D),
+    MPU_SPELL_SET(50D),
+    MPU_SPELL_SET(60D),
+    MPU_SPELL_SET(70D),
+    MPU_SPELL_SET(450D),
+    MPU_SPELL_SET(500D),
+    MPU_SPELL_SET(550D),
+    MPU_SPELL_SET(600D),
+    MPU_SPELL_SET(700D),
+    MPU_SPELL_SET(100D),
+    MPU_SPELL_SET(EOSM),
+    MPU_SPELL_SET(EOSM2),
+#undef MPU_SPELL_SET
+};
+
 void mpu_spells_init(void)
 {
-#define MPU_SPELL_SET(cam) \
-    if (strcmp(eos_state->model->name, #cam) == 0) { \
-        mpu_init_spells = mpu_init_spells_##cam; \
-        mpu_init_spell_count = COUNT(mpu_init_spells_##cam); \
+    const char *spells = eos_state->model->mpu_spells ? eos_state->model->mpu_spells
+                                                      : eos_state->model->name;
+    for (int i = 0; i < COUNT(mpu_spell_sets); i++)
+    {
+        if (strcmp(spells, mpu_spell_sets[i].name) == 0)
+        {
+            mpu_init_spells = mpu_spell_sets[i].spells;
+            mpu_init_spell_count = mpu_spell_sets[i].count;
+        }
     }
-
-#define MPU_SPELL_SET_OTHER_CAM(cam1,cam2) \
-    if (strcmp(eos_state->model->name, #cam1) == 0) { \
-        mpu_init_spells = mpu_init_spells_##cam2; \
-        mpu_init_spell_count = COUNT(mpu_init_spells_##cam2); \
-    }
-
-    MPU_SPELL_SET(5D2)
-    MPU_SPELL_SET(5D3)
-    MPU_SPELL_SET(6D)
-    MPU_SPELL_SET(50D)
-    MPU_SPELL_SET(60D)
-    MPU_SPELL_SET(70D)
-    MPU_SPELL_SET(450D)
-    MPU_SPELL_SET(500D)
-    MPU_SPELL_SET(550D)
-    MPU_SPELL_SET(600D)
-    MPU_SPELL_SET(700D)
-    MPU_SPELL_SET(100D)
-    MPU_SPELL_SET(EOSM)
-    MPU_SPELL_SET(EOSM2)
-
-    /* 1200D works with 60D MPU spells... and BOOTS THE GUI!!! */
-    /* same for 1100D */
-    MPU_SPELL_SET_OTHER_CAM(1000D, 450D)
-    MPU_SPELL_SET_OTHER_CAM(1100D, 60D)
-    MPU_SPELL_SET_OTHER_CAM(1200D, 60D)
-    MPU_SPELL_SET_OTHER_CAM(1300D, 600D)
-    MPU_SPELL_SET_OTHER_CAM(4000D, 600D)
-    MPU_SPELL_SET_OTHER_CAM(40D, 50D)
-
-    MPU_SPELL_SET_OTHER_CAM(650D, 700D)
 
     if (!mpu_init_spell_count)
     {
@@ -1277,39 +1302,17 @@ void mpu_spells_init(void)
 
     mpu_check_duplicate_spells();
 
-#define MPU_BUTTON_CODES(cam) \
-    if (strcmp(eos_state->model->name, #cam) == 0) { \
-        button_codes = button_codes_##cam; \
+    /* button code tables (mpu_spells/button_codes.h, mpu_button_sets above): .button_codes,
+     * else the model's own name */
+    const char *buttons = eos_state->model->button_codes ? eos_state->model->button_codes
+                                                         : eos_state->model->name;
+    for (int i = 0; i < COUNT(mpu_button_sets); i++)
+    {
+        if (strcmp(buttons, mpu_button_sets[i].name) == 0)
+        {
+            button_codes = mpu_button_sets[i].codes;
+        }
     }
-
-#define MPU_BUTTON_CODES_OTHER_CAM(cam1,cam2) \
-    if (strcmp(eos_state->model->name, #cam1) == 0) { \
-        button_codes = button_codes_##cam2; \
-    }
-
-    MPU_BUTTON_CODES(100D)
-    MPU_BUTTON_CODES(1100D)
-    MPU_BUTTON_CODES(1200D)
-    MPU_BUTTON_CODES_OTHER_CAM(1300D, 1200D)
-    MPU_BUTTON_CODES_OTHER_CAM(4000D, 1200D)
-    MPU_BUTTON_CODES(450D)
-    MPU_BUTTON_CODES_OTHER_CAM(1000D, 450D)
-    MPU_BUTTON_CODES(40D)
-    MPU_BUTTON_CODES(500D)
-    MPU_BUTTON_CODES(550D)
-    MPU_BUTTON_CODES(50D)
-    MPU_BUTTON_CODES(5D2)
-    MPU_BUTTON_CODES(5D3)
-    MPU_BUTTON_CODES(600D)
-    MPU_BUTTON_CODES(60D)
-    MPU_BUTTON_CODES(6D)
-    MPU_BUTTON_CODES(650D)
-    MPU_BUTTON_CODES_OTHER_CAM(700D, 650D)
-    MPU_BUTTON_CODES(70D)
-    MPU_BUTTON_CODES(7D)
-    MPU_BUTTON_CODES(EOSM)
-    MPU_BUTTON_CODES(200D)
-    MPU_BUTTON_CODES_OTHER_CAM(EOSM2, EOSM)
 
     if (!button_codes)
     {

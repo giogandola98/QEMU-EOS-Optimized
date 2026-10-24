@@ -1,10 +1,11 @@
 /*
  * Canon EOS 1100D 1.0.5: still-photo capture data for hw/eos/capture.c (docs/models/capture.md).
- * Selected by eos_model_desc.capture (model_list.c).
+ * Selected by eos_model_desc.capture (model.inc.c).
  */
 
 #include "qemu/osdep.h"
 #include "hw/eos/capture.h"
+#include "profile.h"
 
 const struct capture_profile capture_1100d = {
     .release_gpio       = 0xC02200EC,       /* DIGIC 4 style GPIO: bits 2-3 = mode, bit 1 = level */

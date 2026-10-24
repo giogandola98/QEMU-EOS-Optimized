@@ -751,19 +751,18 @@ static void eos_rom_write(void *opaque, hwaddr addr, uint64_t value, uint32_t si
     uint32_t rom_addr = (rom_id) ? ROM1_ADDR : ROM0_ADDR;;
     uint32_t address = rom_addr + addr;
 
-    if (strcmp(s->model->name, MODEL_NAME_1300D) == 0 ||
-        strcmp(s->model->name, MODEL_NAME_4000D) == 0)
+    if (s->model->flash_id)
     {
         if (address == 0xF8000000 && size == 1 && value == 6)
         {
             // Reading flash model ID?
             // Startup code writes to this address, but expects to read
-            // different values: C2 25 39, 20 BB 19 or 01 02 19.
-            // 4000D 1.1.0 accepts C2 25 38, 20 BB 18 or 01 20 18 instead
-            // (FE0C1BC0, assert Startup.c:220 otherwise): a 16MB part.
+            // one of a few IDs (1300D: C2 25 39, 20 BB 19 or 01 02 19;
+            // 4000D 1.1.0: C2 25 38, 20 BB 18 or 01 20 18, a 16MB part,
+            // FE0C1BC0, assert Startup.c:220 otherwise).
+            // The model entry gives the one to answer (.flash_id).
             msg = "Flash model ID?";
-            uint32_t model_id = strcmp(s->model->name, MODEL_NAME_4000D) == 0
-                ? 0x003825C2 : 0x003925C2;
+            uint32_t model_id = s->model->flash_id;
             MEM_WRITE_ROM(address, (uint8_t *) &model_id, 4);
             goto end;
         }
@@ -776,7 +775,7 @@ static void eos_rom_write(void *opaque, hwaddr addr, uint64_t value, uint32_t si
     // more correct implementation would detect commands and only allow writes
     // when enabled
     // Almost certainly applies to many other cams
-    if (strcmp(s->model->name, MODEL_NAME_A1100) == 0) {
+    if (s->model->quirks & EOS_QUIRK_FLASH_CTRL_RO) {     /* A1100 */
         // actual firmware addresses are ffc* as above, but qemu sees 0xf8*
         if(address == 0xf8000aaa ||  address == 0xf8000554)  {
             msg = "Flash control";
@@ -950,7 +949,7 @@ static int cfdma_write_data(CFState *cf);
 static void cfdma_trigger_interrupt(void);
 
 
-/* selfRefresh (pm.h: eos_pm_1100d, eos_pm_4000d): all module clocks gated, DIGIC timers stopped until
+/* selfRefresh (pm.h; cams/1100D/pm.c, cams/4000D/pm.c): all module clocks gated, DIGIC timers stopped until
  * a wake */
 static bool eos_clocks_gated;
 
@@ -1552,16 +1551,16 @@ static void eos_update_display(void *parm)
     int out_height = height;
 
     // VxWorks models and some PowerShots have 720x240 screens stretched vertically
-    if (s->model->digic_version < 4 || strcmp(s->model->name, MODEL_NAME_A1100) == 0)
+    if (s->model->digic_version < 4 || (s->model->quirks & EOS_QUIRK_DISP_LINE_DOUBLE))
     {
         height_multiplier = 2;
         height /= height_multiplier;
         assert(out_height == height * height_multiplier);
     }
 
-    if (strcmp(s->model->name, MODEL_NAME_1100D) == 0)
+    if (s->model->quirks & EOS_QUIRK_DISP_YUV_HALF)
     {
-        // half-size YUV buffer
+        // half-size YUV buffer (1100D)
         yuv_height /= 2;
     }
 
@@ -1621,9 +1620,7 @@ static void eos_update_display(void *parm)
             &first, &last
         );
     }
-    else if (strcmp(s->model->name, MODEL_NAME_EOSM3) == 0 ||
-             strcmp(s->model->name, MODEL_NAME_EOSM50) == 0 ||
-             strcmp(s->model->name, MODEL_NAME_EOSRP) == 0)
+    else if (s->model->quirks & EOS_QUIRK_DISP_BMP_YUV8B)     /* EOSM3, M50, RP */
     {
         uint64_t size = height * s->disp.bmp_pitch;
         MemoryRegionSection section = memory_region_find(
@@ -1925,12 +1922,12 @@ static void *eos_init_cpu(void)
     eos_state->rtc.regs[0x0E] = 0x20;                           /* Control Register 1: 24-hour mode, no alarms */
     eos_state->rtc.regs[0x0F] = eos_state->model->rtc_control_reg_2;    /* Control Register 2: XST (model-specific), PON... */
 
-    if (strcmp(eos_state->model->name, MODEL_NAME_400D) == 0)
+    if (EOS_QUIRK(RTC_REG0_0C))     /* 400D */
     {
         /* fixme: RTC protocol unknown, but returning 0xC everywhere brings the GUI */
         eos_state->rtc.regs[0x00] = 0xC;
     }
-    else if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0)
+    else if (EOS_QUIRK(RTC_PS))     /* A1100 */
     {
         // values observed on D10, in response to command 2 which has similar code
         // See A1100 ffc2f1d4 D10 ff845960
@@ -1965,9 +1962,21 @@ static void *eos_init_cpu(void)
     return eos_state;
 }
 
-#if 1
-static void patch_200D(void)
+/*
+ * Init hooks of the upstream models (eos_model_desc.init_hook, set in model_list.c), called by
+ * eos_init_common() after the MPU and engine init, before the start address is set.
+ */
+
+void eos_init_7D(void)
 {
+    fprintf(stderr, "Disabling IPC (boot flag 0x24)\n");
+    uint32_t flag = 0;
+    MEM_WRITE_ROM(eos_state->model->bootflags_addr + 0x24, (uint8_t *)&flag, 4);
+}
+
+void eos_init_200D(void)
+{
+    printf(" ==== patching 200D\n");
     uint8_t *buf = NULL;
     buf = calloc(0xce24, 1);
     address_space_read(&address_space_memory, 0xe11c11c0,
@@ -1978,9 +1987,8 @@ static void patch_200D(void)
                         0xce24);
     return;
 }
-#endif
 
-static void patch_EOSM3(void)
+void eos_init_EOSM3(void)
 {
     fprintf(stderr, "Patching 0xFCC637A8 (enabling TIO)\n");
     uint32_t one = 1;
@@ -2024,14 +2032,14 @@ static void patch_EOSM3(void)
     MEM_WRITE_ROM(0xFC10A312, (uint8_t*) &pdword0x0, 4);    
 }
 
-static void patch_EOSM10(void)
+void eos_init_EOSM10(void)
 {
     fprintf(stderr, "Patching 0xFCE642A8 (enabling TIO)\n");
     uint32_t one = 1;
     MEM_WRITE_ROM(0xFCE642A8, (uint8_t*) &one, 4);
 }
 
-static void patch_EOSM5(void)
+void eos_init_EOSM5(void)
 {
     /* 0x4060, in the block copied from 0xE001B2E4 to 0x4000 */
     fprintf(stderr, "Patching 0xE001B2E4+0x60 (enabling TIO on DryOs #1)\n");
@@ -2041,6 +2049,25 @@ static void patch_EOSM5(void)
     /* 0x8098, in the block copied from 0xE115CF88 to 0x8000 */
     fprintf(stderr, "Patching 0xE115CF88+0x98 (enabling TIO on DryOs #2)\n");
     MEM_WRITE_ROM(0xE115CF88+0x98, (uint8_t*) &one, 4);
+}
+
+void eos_init_5D3eeko(void)
+{
+    /* see EekoBltDmac calls (5D3 1.1.3)
+     * EekoBltDmac(0x0, 0xd0288000, 0xff99541c, 0x6b8c,  0xff508e78, 0x0), from ff508f30
+     * EekoBltDmac(0x0, 0x1e80000,  0xff99c164, 0x10e8,  0xff508e78, 0x0), from ff508fd0
+     * EekoBltDmac(0x0, 0x1e00000,  0xff8bf888, 0x4ef14, 0xff217de8, 0x0), from ff217e34
+     * EekoBltDmac(0x0, 0xd0280000, 0xff99bfa8, 0x1bc,   0xff508e78, 0x0), from ff508fd0
+     */
+    
+    /* all dumps must be made before starting the Eeko core, but after the above copy calls
+     * 5D3 1.1.3: 0xFF508F78 (right before writing 7 to C022320C) */
+    eos_load_image("D0288000.DMP", 0, 0x008000, 0,          0);
+    eos_load_image("D0280000.DMP", 0, 0x004000, 0x40000000, 0);
+    eos_load_image("1E00000.DMP",  0, 0x120000, 0x1E00000,  0); /* overlaps 2 regions */
+    eos_load_image("1F20000.DMP",  0, 0x020000, 0x1F20000,  0); /* non-shareable device */
+    eos_state->cpu0->env.regs[15] = 0;
+    eos_state->cpu0->env.thumb = 1;
 }
 
 
@@ -2114,34 +2141,11 @@ static void eos_init_common(void)
     /* init image processing engine */
     engine_init();
 
-    if (strcmp(eos_state->model->name, MODEL_NAME_7D) == 0)
+    /* model-specific setup: ROM patches, boot flags, extra images (7D, 200D, EOSM3/M10/M5, 5D3eeko).
+     * Runs before the start address below, which the 5D3eeko (DIGIC "50") hook sets itself. */
+    if (eos_state->model->init_hook)
     {
-        fprintf(stderr, "Disabling IPC (boot flag 0x24)\n");
-        uint32_t flag = 0;
-        MEM_WRITE_ROM(eos_state->model->bootflags_addr + 0x24, (uint8_t *)&flag, 4);
-    }
-    
-#if 1
-    if (strcmp(eos_state->model->name, MODEL_NAME_200D) == 0)
-    {
-        printf(" ==== patching 200D\n");
-        patch_200D();
-    }
-#endif
-
-    if (strcmp(eos_state->model->name, MODEL_NAME_EOSM3) == 0)
-    {
-        patch_EOSM3();
-    }
-
-    if (strcmp(eos_state->model->name, MODEL_NAME_EOSM10) == 0)
-    {
-        patch_EOSM10();
-    }
-
-    if (strcmp(eos_state->model->name, MODEL_NAME_EOSM5) == 0)
-    {
-        patch_EOSM5();
+        eos_state->model->init_hook();
     }
 
     if (eos_state->model->digic_version == 6)
@@ -2162,25 +2166,6 @@ static void eos_init_common(void)
         fprintf(stderr, "Start address: 0x%08X\n", eos_state->cpu0->env.regs[15]);
     }
 
-    if (strcmp(eos_state->model->name, MODEL_NAME_5D3eeko) == 0)
-    {
-        /* see EekoBltDmac calls (5D3 1.1.3)
-         * EekoBltDmac(0x0, 0xd0288000, 0xff99541c, 0x6b8c,  0xff508e78, 0x0), from ff508f30
-         * EekoBltDmac(0x0, 0x1e80000,  0xff99c164, 0x10e8,  0xff508e78, 0x0), from ff508fd0
-         * EekoBltDmac(0x0, 0x1e00000,  0xff8bf888, 0x4ef14, 0xff217de8, 0x0), from ff217e34
-         * EekoBltDmac(0x0, 0xd0280000, 0xff99bfa8, 0x1bc,   0xff508e78, 0x0), from ff508fd0
-         */
-        
-        /* all dumps must be made before starting the Eeko core, but after the above copy calls
-         * 5D3 1.1.3: 0xFF508F78 (right before writing 7 to C022320C) */
-        eos_load_image("D0288000.DMP", 0, 0x008000, 0,          0);
-        eos_load_image("D0280000.DMP", 0, 0x004000, 0x40000000, 0);
-        eos_load_image("1E00000.DMP",  0, 0x120000, 0x1E00000,  0); /* overlaps 2 regions */
-        eos_load_image("1F20000.DMP",  0, 0x020000, 0x1F20000,  0); /* non-shareable device */
-        eos_state->cpu0->env.regs[15] = 0;
-        eos_state->cpu0->env.thumb = 1;
-    }
-    
     if (options)
     {
         /* fixme: reinventing the wheel */
@@ -2478,124 +2463,6 @@ EOSRegionHandler *eos_find_handler(unsigned int address)
         eos_handler_cache[slot].handler = handler;
     }
     return handler;
-}
-
-/*
- * 1100D power management (PowerMgr idle loop and selfRefresh; ML-Optimized docs/firmware/1100D-powersave.md).
- * Without these, Canon's mode-2 idle loop finds neither sleep condition and spins at 0xFF1EA818.
- *   0xC0400008 bit1  image-engine clock (LCLK): written by ClockSaver, stored by eos_handle_basic
- *   0xC0F01004       LCLK client mask: reads 0x400, what the low-clock WFI path expects at idle
- *   0xC0400004       clock select (0x03 <-> 0x17 around that WFI): stored
- *   0xC0220094 bit0  selfRefresh enabled (GPIO): 1
- *   0xC0210600 bit0, 0xC0100110 bit31, 0xC0100204   handshakes: ready at once. 0xC022F198 keeps its
- *                    0/1 toggle (eos_handle_gpio): the bootloader waits for bit0 = 1 there, selfRefresh for 0
- *   0xC0201308 bit4  wake flag polled with IRQs masked: set while an interrupt is pending. While none is,
- *                    the vCPU is halted (like WFI) instead of spinning, until the next interrupt.
- *   0xC0400008 = 0   selfRefresh gates every module clock, timers included: from that write until Canon
- *                    restores a non-zero value the DIGIC timers, the DryOS tick and the HPTimers stand
- *                    still (eos_interrupt_timer_body), so only a key/MPU interrupt ends the sleep, as on the
- *                    camera. Each sleep logs "[PM1100D] self-refresh #n in" and, on wake, its length in
- *                    virtual time and the interrupt that ended it.
- * QEMU_EOS_PM_TRACE=1 prints the first accesses to each of these registers and every LCLK edge;
- * QEMU_EOS_PM_MODEL=0 disables
- * the model.
- */
-bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int value, unsigned int *ret)
-{
-    static uint32_t clksel, lclk_mask, wake_ctrl, timer600 = 1, basic204;
-    static unsigned int sr_count, wake_irq;
-    static int64_t sr_start_ns, sr_total_ns;
-    static int trace = -1;
-    static unsigned int trace_count[8];
-    uint32_t *reg = NULL;
-    int idx;
-
-    switch (address) {
-    case 0xC0F01004: idx = 0; reg = &lclk_mask; break;
-    case 0xC0400004: idx = 1; reg = &clksel; break;
-    case 0xC0220094: idx = 2; break;
-    case 0xC0210600: idx = 3; reg = &timer600; break;
-    case 0xC0100204: idx = 4; reg = &basic204; break;
-    case 0xC022F198: idx = 5; break;
-    case 0xC0201308: idx = 6; reg = &wake_ctrl; break;
-    case 0xC0400008: idx = 7; break;        /* clock gate; the value is stored by eos_handle_basic */
-    default:
-        return false;
-    }
-
-    bool handled = true;
-    if (type & MODE_WRITE) {
-        if (reg) {
-            *reg = value;
-        }
-        if (idx == 7 && !value != eos_clocks_gated) {
-            int64_t now = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL);
-            eos_clocks_gated = !value;
-            if (!value) {
-                sr_start_ns = now;
-                wake_irq = 0;
-                fprintf(stderr, "[PM1100D] self-refresh #%u in (pc %08X)\n", ++sr_count,
-                        CURRENT_CPU->env.regs[15]);
-            } else {
-                sr_total_ns += now - sr_start_ns;
-                fprintf(stderr, "[PM1100D] self-refresh #%u out after %.3f s, wake irq 0x%02X, total %.3f s\n",
-                        sr_count, (now - sr_start_ns) / 1e9, wake_irq, sr_total_ns / 1e9);
-            }
-        }
-        /* timer 6 control, 0xC022F198 and CLOCK_ENABLE keep their usual handlers */
-        handled = (idx != 3 && idx != 5 && idx != 7);
-    } else {
-        switch (idx) {
-        case 0: *ret = 0x400; break;
-        case 2: *ret = 1; break;
-        case 5: handled = false; break;
-        case 6: {
-            CPUState *cs = CPU(CURRENT_CPU);
-            bool pending = eos_state->irq_id || (cs->interrupt_request & CPU_INTERRUPT_HARD);
-            *ret = (wake_ctrl & ~0x10u) | (pending ? 0x10 : 0);
-            if (pending && !wake_irq) {
-                wake_irq = eos_state->irq_id;
-            }
-            if (!pending) {
-                /* takes effect at the end of this TB: the poll loop sleeps until an interrupt */
-                cpu_interrupt(cs, CPU_INTERRUPT_HALT);
-            }
-            break;
-        }
-        case 7: handled = false; break;
-        default: *ret = *reg; break;
-        }
-    }
-
-    if (trace < 0) {
-        const char *env = getenv("QEMU_EOS_PM_TRACE");
-        trace = env && env[0] == '1';
-    }
-    if (trace && idx == 7 && (type & MODE_WRITE) && ((value ^ eos_state->clock_enable) & 2)) {
-        /* every LCLK edge (ClockSaver), not only the first 40 accesses: what the deep sleep depends on */
-        fprintf(stderr, "[PM1100D] LCLK %s (CLOCK_ENABLE 0x%X, pc %08X)\n", (value & 2) ? "on" : "off",
-                value, CURRENT_CPU->env.regs[15]);
-    }
-    if (trace && idx == 0 && (type & MODE_WRITE)) {
-        /* ClockSaver client mask: who changes it (return addresses on the stack), to find the client
-         * keeping LCLK on */
-        uint32_t sp = CURRENT_CPU->env.regs[13], w[40];
-        cpu_physical_memory_read(sp, w, sizeof(w));
-        fprintf(stderr, "[PM1100D] LCLK mask <- 0x%X lr %08X, ROM words on stack:", value,
-                CURRENT_CPU->env.regs[14]);
-        for (int i = 0; i < 40; i++) {
-            if (w[i] >= 0xFF000000) {
-                fprintf(stderr, " %08X", w[i]);
-            }
-        }
-        fprintf(stderr, "\n");
-    }
-    if (trace && trace_count[idx]++ < 40) {
-        fprintf(stderr, "[PM1100D] %s 0x%08X %s 0x%X (pc %08X)\n", (type & MODE_WRITE) ? "W" : "R",
-                address, (type & MODE_WRITE) ? "<-" : "->", (type & MODE_WRITE) ? value : (handled ? *ret : 0),
-                CURRENT_CPU->env.regs[15]);
-    }
-    return handled;
 }
 
 unsigned int eos_handler(unsigned int address, unsigned char type, unsigned int value)
@@ -3537,7 +3404,7 @@ static int eos_handle_rtc_cs(unsigned int parm, unsigned int address, unsigned c
     if (type & MODE_WRITE)
     {
         unsigned int cs_active;
-        if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0)
+        if (EOS_QUIRK(RTC_PS))     /* A1100 */
         {
             cs_active = ((value & 0x800) == 0x800);
         }
@@ -3668,7 +3535,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
     {
         case 0x0068:
             // RTC related, seems to be set *after* setup register so not usable as rtc_cs
-            if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+            if (EOS_QUIRK(RTC_PS)) {    /* A1100 */
                 if(type & MODE_WRITE) {
                     if(value == 0x46) {
                         msg = "RTC com on";
@@ -3732,8 +3599,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
             }
             else
             {
-                if (strcmp(eos_state->model->name, MODEL_NAME_5D2) == 0 ||
-                    strcmp(eos_state->model->name, MODEL_NAME_50D) == 0)
+                if (EOS_QUIRK(GPIO_VSW_6000))
                 {
                     ret = 0x6000;
                     msg = "VSW_STATUS 5D2/50D";
@@ -3752,8 +3618,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
             break;
 
       case 0xF48C:
-            if (strcmp(eos_state->model->name, MODEL_NAME_1300D) == 0 ||
-                strcmp(eos_state->model->name, MODEL_NAME_4000D) == 0)
+            if (EOS_QUIRK(GPIO_F48C_HDMI))     /* 1300D, 4000D */
             {
                 /* 1300D: return 0 here to bypass "System & Display Check & Adjustment program" */
                 /* 0x4000000 = HDMI disconnected */
@@ -3891,7 +3756,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
 
         case 0x011C:    /* 40D, 450D */
             msg = "VIDEO CONNECT";
-            ret = (strcmp(eos_state->model->name, MODEL_NAME_40D) == 0) ? 0 : 1;
+            ret = EOS_QUIRK(GPIO_11C_LOW) ? 0 : 1;   /* 40D: 0 */
 #ifdef IGNORE_CONNECT_POLL
             return ret;
 #endif
@@ -3913,7 +3778,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
         case 0x0134:    /* EOSM */
             msg = "MIC CONNECT";
             // A1100 this is related to startup key press (ffc3040c)
-            if((strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) && ((address & 0xFFFF) == 0x134)) {
+            if (EOS_QUIRK(PS_KEYS) && ((address & 0xFFFF) == 0x134)) {
                 msg = "A1100 start key";
                 ret = 0;
                 break;
@@ -3959,7 +3824,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
             if (eos_state->model->digic_version == 5) {
                 msg = "VIDEO CONNECT";      /* EOSM; likely other D5 models */
                 ret = 1;                    /* negative logic */
-            } else if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0 ) {
+            } else if (EOS_QUIRK(PS_KEYS)) {     /* A1100 */
                 msg = "PB startup";       /* indicates play switch startup ffc3040c */
                 ret = 1;
                 break;
@@ -3976,7 +3841,7 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
         case 0x200:
         case 0x204:
         case 0x208:
-            if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0 ) {
+            if (EOS_QUIRK(PS_KEYS)) {
                 uint32_t physw_mmio_bits[] = {
                     0x00000000, // unknown
                     0x0001FF00, // 0xFF00 = unpressed state of D-pad, Menu, PRINT,
@@ -4071,24 +3936,10 @@ unsigned int eos_handle_adc(unsigned int parm, unsigned int address, unsigned ch
             msg = "channel #%d";
             msg_arg1 = channel;
             
-            if (strcmp(eos_state->model->name, MODEL_NAME_EOSM3) == 0 ||
-                strcmp(eos_state->model->name, MODEL_NAME_EOSM10) == 0)
+            /* per-model readings (model_list.c .adc_values; EOSM3, EOSM10) */
+            if (eos_state->model->adc_values && channel < eos_state->model->adc_count)
             {
-                /* values from Ant123's camera (M3) */
-                uint32_t adc_values[] = {
-                    0x0000de40, 0x00008c00, 0x00008300, 0x00003ca0,
-                    0x00003eb0, 0x00003f00, 0x0000aa90, 0x00000050,
-                    0x00003c20, 0x0000fd60, 0x0000f720, 0x00000030,
-                    0x00008a80, 0x0000a440, 0x00000020, 0x00000030,
-                    0x00000030, 0x00008900, 0x0000fd60, 0x0000fed0,
-                    0x0000fed0, 0x00000310, 0x00000020, 0x00000020,
-                    0x00000020, 0x00000020, 0x00000010, 0x00000000
-                };
-
-                if (channel < COUNT(adc_values))
-                {
-                    ret = adc_values[channel];
-                }
+                ret = eos_state->model->adc_values[channel];
             }
         }
         // digic 2 - 5 P&S style
@@ -4099,41 +3950,17 @@ unsigned int eos_handle_adc(unsigned int parm, unsigned int address, unsigned ch
                 int channel = (off - 0x40) >> 1;
                 msg = "channel #%d+"; // can't distinguish channels in high and low words
                 msg_arg1 = channel;
-                if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0)
+                // digic 2 - 5 P&S style, each ADC is half word, but fw reads full word and shifts/masks
+                // per-model readings: model_list.c .adc_ps_values (A1100)
+                const uint32_t *adc_values = eos_state->model->adc_ps_values;
+                if (adc_values && channel >= 0 && channel < eos_state->model->adc_ps_count)
                 {
-                    // digic 2 - 5 P&S style, each ADC is half word, but fw reads full word and shifts/masks
-                    // representative values from d10, channel usage seems
-                    // mostly consistent for digic 2-5, but valid voltage
-                    // may vary and AA battery cams don't have tbat and
-                    // may use different order for temps
-                    // see https://chdk.setepontos.com/index.php?topic=10385.msg102943#msg102943
-                    uint32_t adc_values[] = {
-                       0,   // channel  0 0xc0900040 0 0x0
-                       1,   // channel  1 0xc0900042 1 0x1
-    //                   803, // channel  2 0xc0900044 803 0x323 < vbat ~4.037v (from LiPo battery D10)
-                       497, // channel  2 value from A540 ~2.215v (2x AA battery cam like A1100)
-                       471, // channel  3 0xc0900046 471 0x1d7 < tccd ~15c
-                       448, // channel  4 0xc0900048 448 0x1c0 < topt ~13c
-                       422, // channel  5 0xc090004a 422 0x1a6 < tbat ~ 17c
-                       1,   // channel  6 0xc090004c 1 0x1
-                       1,   // channel  7 0xc090004e 1 0x1
-                       1,   // channel  8 0xc0900050 1 0x1
-                       1,   // channel  9 0xc0900052 1 0x1
-                       565, // channel 10 0xc0900054 565 0x235
-                       1,   // channel 11 0xc0900056 1 (USB not present) - 524 0x20c (USB present)
-                    };
-                    if (channel >= 0 && channel < COUNT(adc_values))
-                    {
-                        ret = adc_values[channel & ~1] | (adc_values[channel | 1]  << 16);
-                    }
+                    ret = adc_values[channel & ~1] | (adc_values[channel | 1]  << 16);
                 }
             } else if (off == 0xb0) {
                 msg = "bat voltage";
-                if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
-                    // avoids bad return value from ffc106ec, related to battery
-                    // value seen on a540, 2xAA battery at 2.6v. LiPo camera at 4.2 = 0x2033c
-                    ret = 0x2024f;
-                }
+                // A1100 (.adc_ps_battery) avoids a bad return value from ffc106ec, related to battery
+                ret = eos_state->model->adc_ps_battery;
             } else if (off == 0xd4) {
                 msg = "ADC ready?";
                 ret = 0x0ffe000a; // A1100 ffc2dd28, related to ADC setup, avoid long busy loop polling MMIO. Value from D10
@@ -4473,7 +4300,7 @@ unsigned int eos_handle_uart(unsigned int parm, unsigned int address, unsigned c
                     msg = "enable interrupt?";
                     enable_tio_interrupt = 1;
                 }
-                else if (strcmp(eos_state->model->name, MODEL_NAME_EOSM3) != 0)
+                else if (!EOS_QUIRK(UART_TIO_KEEP))     /* all but EOSM3 */
                 {
                     enable_tio_interrupt = value & 1;
                 }
@@ -4711,9 +4538,7 @@ static unsigned int eos_handle_rtc(unsigned int parm, unsigned int address, unsi
                     {
                         uint8_t cmd = last_sio_txdata & 0x0F;
                         uint8_t reg = (last_sio_txdata>>4) & 0x0F;
-                        if (!strcmp(eos_state->model->name, MODEL_NAME_5D2) ||
-                            !strcmp(eos_state->model->name, MODEL_NAME_50D) ||
-                            !strcmp(eos_state->model->name, MODEL_NAME_40D))
+                        if (EOS_QUIRK(RTC_NIBBLE_SWAP))    /* 5D2, 50D, 40D */
                         {
                             reg = last_sio_txdata & 0x0F;
                             cmd = (last_sio_txdata>>4) & 0x0F;
@@ -5051,7 +4876,7 @@ static unsigned int eos_handle_A1100_rtc(unsigned int parm, unsigned int address
 
 unsigned int eos_handle_sio(unsigned int parm, unsigned int address, unsigned char type, unsigned int value)
 {
-    if ((address & 0xFFFFFF00) == 0xC0820400 && strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+    if ((address & 0xFFFFFF00) == 0xC0820400 && EOS_QUIRK(PS_IS)) {     /* A1100 */
         return eos_handle_A1100_IS_com(parm, address, type, value);
     }
 
@@ -5063,7 +4888,7 @@ unsigned int eos_handle_sio(unsigned int parm, unsigned int address, unsigned ch
 
     // A1100 only treat SIO2 0xC08202** as RTC, unclear if other SIO could be active at same time
     // SIO2 appears to be shared with something else referenced from AudioTsk and StartupImage tasks
-    if ((address & 0xFFFFFF00) == 0xC0820200 && strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+    if ((address & 0xFFFFFF00) == 0xC0820200 && EOS_QUIRK(RTC_PS)) {    /* A1100 */
         if(eos_state->rtc.transfer_format != RTC_INACTIVE)
         {
             return eos_handle_A1100_rtc(parm, address, type, value);
@@ -5179,7 +5004,7 @@ static int eos_sd_do_command(SDState *sd, SDRequest *req, uint8_t *response)
     and this avoids impact on other cameras
     Other PowerShots of similar generation likely require the same workaround
 */
-    if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+    if (EOS_QUIRK(SD_ACMD41_REPLAY)) {     /* A1100 */
         static uint8_t last_acmd41_resp[20];
         static uint8_t last_cmd55_resp[20];
         static enum {
@@ -5517,7 +5342,7 @@ unsigned int eos_handle_sdio(unsigned int parm, unsigned int address, unsigned c
             msg = "irq enable?";
             MMIO_VAR(eos_state->sd.irq_flags);
             /* A1100 uses both the SDDMA reg 0x10 as described below and this one, break to avoid double write */
-            if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+            if (EOS_QUIRK(SD_IRQ_EN_ONLY)) {
                 break;
             }
 
@@ -6008,7 +5833,7 @@ unsigned int eos_handle_cfdma(unsigned int parm, unsigned int address, unsigned 
     const char *msg = NULL;
 
     // A1100 uses 0xc0500040 - 58, related to IS system, see ffcf5bf8
-    if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0
+    if (EOS_QUIRK(PS_IS)
         && address >= 0xc0500040 &&  address <= 0xc0500058) {
         return eos_handle_A1100_IS_init(parm,address,type,value);
     }
@@ -6407,7 +6232,7 @@ unsigned int eos_handle_display(unsigned int parm, unsigned int address, unsigne
         {
             // A1100 expects 0x4 or 0x8, 0x4 appears to be normal case in INT 0x68 handler ffc2ba64
             // avoids assert from TakeSemaphoreStrictly(0x2680) in ffc404e8
-            if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+            if (EOS_QUIRK(DISP_LINE_DOUBLE)) {     /* A1100 */
                 ret = 0x4;
             } else {
             /* 5D3 1.2.3: expects 0x10 for built-in LCD and 0x4 for HDMI? */
@@ -6466,7 +6291,7 @@ unsigned int eos_handle_display(unsigned int parm, unsigned int address, unsigne
                 int entry = (((address & 0xFFF) - 0x400) / 4) % 0x100;
                 process_palette_entry(value, &eos_state->disp.palette_8bit[entry], entry, &msg);
                 eos_state->disp.is_4bit = 0;
-                if (strcmp(eos_state->model->name, MODEL_NAME_A1100) == 0) {
+                if (EOS_QUIRK(DISP_LINE_DOUBLE)) {     /* A1100: 720x240 */
                     eos_state->disp.bmp_pitch = 720;
                 } else {
                     eos_state->disp.bmp_pitch = 960;
@@ -7042,7 +6867,7 @@ unsigned int eos_handle_digic6(unsigned int parm, unsigned int address, unsigned
         
         case 0xD2030108:    /* D6 */
         case 0xD2060048:    /* D7 */
-            if (strcmp(eos_state->model->name, MODEL_NAME_EOSM3) == 0)
+            if (EOS_QUIRK(DISP_BMP_PAD16))     /* EOSM3 */
             {
                 if ((value != 0x17410) && (value != 0x18010)) eos_state->disp.bmp_vram = value << 8;
                 eos_state->disp.bmp_pitch = (eos_state->disp.width + 16) * 2;
@@ -7177,7 +7002,7 @@ unsigned int eos_handle_digic6(unsigned int parm, unsigned int address, unsigned
             else
             {
                 msg = "I2C status?";
-                if (strcmp(eos_state->model->name, MODEL_NAME_EOSM10) == 0)
+                if (EOS_QUIRK(I2C_RANDOM))     /* EOSM10 */
                 {
                     ret = rand();
                 }

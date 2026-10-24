@@ -4,6 +4,8 @@ obj-y += ../eos/eos_ml_helpers.o ../eos/mpu.o ../eos/serial_flash.o
 obj-y += ../eos/dbi/logging.o ../eos/dbi/memcheck.o ../eos/dbi/debugmsg.o
 obj-y += ../eos/dbi/backtrace.o
 obj-y += ../eos/scnprintf.o
-obj-y += ../eos/cams/pm_4000d.o
-obj-y += ../eos/cams/capture_1100d.o ../eos/cams/capture_4000d.o
 
+# Camera profiles (docs/models/PROFILES.md): every .c in hw/eos/cams/<CAM>/ is built, except the
+# model table entry model.inc.c (included by model_list.c), so a new profile needs no edit here.
+eos-cam-srcs := $(filter-out %.inc.c,$(wildcard $(SRC_PATH)/hw/eos/cams/*/*.c))
+obj-y += $(patsubst $(SRC_PATH)/hw/eos/%.c,../eos/%.o,$(eos-cam-srcs))

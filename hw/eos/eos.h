@@ -75,6 +75,9 @@
 #define MMIO_ADDR     eos_state->model->mmio_addr
 #define MMIO_SIZE     eos_state->model->mmio_size
 
+/* model-specific hardware difference (enum eos_quirk in model_list.h), e.g. EOS_QUIRK(JPCORE_READY) */
+#define EOS_QUIRK(q)  (eos_state->model->quirks & EOS_QUIRK_##q)
+
 /* defines for memory/register access */
 #define INT_ENTRIES 0x200
 

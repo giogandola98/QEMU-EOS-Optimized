@@ -4,8 +4,8 @@
 #include <stdint.h>
 
 /* Still-photo capture (shutter release) emulation. Generic code in capture.c; the per-camera data
- * below lives in hw/eos/cams/capture_<cam>.c and is selected by eos_model_desc.capture (model_list.c,
- * NULL = no capture emulation). See docs/models/capture.md. */
+ * below lives in hw/eos/cams/<CAM>/capture.c (declared in that profile's profile.h) and is selected
+ * by eos_model_desc.capture (NULL = no capture emulation). See docs/models/capture.md. */
 
 struct capture_profile
 {
@@ -25,9 +25,6 @@ struct capture_profile
                                      * restores from its settings when the MPU init does not send it
                                      * (0 = the MPU init sends it) */
 };
-
-extern const struct capture_profile capture_1100d;
-extern const struct capture_profile capture_4000d;
 
 /* key press from the monitor/keyboard (PC scancode, 0x80 bit = release); 1 if consumed */
 int capture_handle_key(int scancode);

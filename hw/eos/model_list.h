@@ -66,11 +66,67 @@ typedef bool (*eos_pm_handler_fn)(unsigned int address, unsigned char type, unsi
 
 struct capture_profile;              /* still-photo capture data, hw/eos/capture.h */
 
+/*
+ * Hardware differences that used to be checked by model name in the shared code. Set in .quirks of
+ * a model entry; each one replaces exactly one former name check, so a model without it gets the
+ * generic (upstream) behaviour. Test with EOS_QUIRK(NAME) (eos.h).
+ */
+enum eos_quirk {
+    EOS_QUIRK_FLASH_CTRL_RO     = 1 << 0,   /* writes to the flash command registers 0xF8000AAA/0x554
+                                             * are dropped instead of changing the ROM (A1100) */
+    EOS_QUIRK_DISP_LINE_DOUBLE  = 1 << 1,   /* 720x240 LCD shown line-doubled, 720-byte bitmap pitch
+                                             * after a palette write, display reg 0x014 reads 4 (A1100;
+                                             * DIGIC 2/3 models get the line doubling anyway) */
+    EOS_QUIRK_DISP_YUV_HALF     = 1 << 2,   /* LiveView YUV buffer has half the display height (1100D) */
+    EOS_QUIRK_DISP_BMP_YUV8B    = 1 << 3,   /* no YUV overlay: the bitmap is drawn as 8-bit YUV
+                                             * (EOSM3, M50, RP) */
+    EOS_QUIRK_DISP_BMP_PAD16    = 1 << 4,   /* DIGIC 6/7 BMP VRAM register: 0x17410/0x18010 do not move
+                                             * the buffer, pitch = (width + 16) * 2 (EOSM3) */
+    EOS_QUIRK_RTC_PS            = 1 << 5,   /* PowerShot RTC: CS = GPIO bit 11, own protocol on SIO2
+                                             * (0xC08202xx), GPIO 0x68 = RTC com, D10 register values (A1100) */
+    EOS_QUIRK_RTC_NIBBLE_SWAP   = 1 << 6,   /* RTC command byte: command in the high nibble, register in
+                                             * the low one (5D2, 50D, 40D) */
+    EOS_QUIRK_RTC_REG0_0C       = 1 << 7,   /* RTC register 0 reads 0xC (protocol unknown, brings the
+                                             * GUI; 400D) */
+    EOS_QUIRK_PS_IS             = 1 << 8,   /* PowerShot image stabiliser: SIO 0xC08204xx and init
+                                             * registers 0xC0500040-58 (A1100) */
+    EOS_QUIRK_PS_KEYS           = 1 << 9,   /* PowerShot keys: GPIO 0x134 start key, 0x138 playback
+                                             * start, 0x200-0x208 physw bits (A1100) */
+    EOS_QUIRK_SD_ACMD41_REPLAY  = 1 << 10,  /* answer the repeated CMD55/ACMD41 from the first one
+                                             * instead of sd.c (A1100) */
+    EOS_QUIRK_SD_IRQ_EN_ONLY    = 1 << 11,  /* SDIO 0x14 only stores the IRQ mask, transfers end via
+                                             * SDDMA 0x10 (A1100) */
+    EOS_QUIRK_UART_TIO_KEEP     = 1 << 12,  /* UART control writes keep the TX interrupt enable (EOSM3) */
+    EOS_QUIRK_I2C_RANDOM        = 1 << 13,  /* I2C status 0xD6050000 reads random values (EOSM10) */
+    EOS_QUIRK_JPCORE_READY      = 1 << 14,  /* JPEG core 0x00 reads 0x1010000 (ready after reset):
+                                             * 1300D, 4000D, A1100, 1100D */
+    EOS_QUIRK_JPCORE_IRQ_DONE   = 1 << 15,  /* JPEG core 0x44 reads 0x400 (done) instead of random
+                                             * (1300D, 4000D, A1100) */
+    EOS_QUIRK_GPIO_11C_LOW      = 1 << 16,  /* GPIO 0x011C (VIDEO CONNECT) reads 0 (40D) */
+    EOS_QUIRK_GPIO_VSW_6000     = 1 << 17,  /* GPIO 0xF480 (VSW status) reads 0x6000 (5D2, 50D) */
+    EOS_QUIRK_GPIO_F48C_HDMI    = 1 << 18,  /* GPIO 0xF48C reads 0x4000000 (HDMI disconnected): skips
+                                             * Canon's system check program (1300D, 4000D) */
+};
+
 struct eos_model_desc {
     const char * name;
-    eos_pm_handler_fn pm_handler;   /* model-specific only, not inherited from the DIGIC defaults */
-    const struct capture_profile *capture;  /* shutter release emulation (hw/eos/cams/capture_*.c);
-                                             * model-specific, NULL = none */
+
+    /* Model-specific behaviour. Not inherited from the DIGIC defaults (outside params[]):
+     * 0 / NULL = the generic upstream behaviour. docs/models/PROFILES.md */
+    eos_pm_handler_fn pm_handler;   /* power management (hw/eos/cams/<CAM>/pm.c) */
+    const struct capture_profile *capture;  /* shutter release emulation (hw/eos/cams/<CAM>/capture.c) */
+    void (*init_hook)(void);        /* end of eos_init_common, before the start address: ROM patches,
+                                     * boot flags, extra images */
+    const char *mpu_spells;         /* MPU init spells (mpu_spells/<name>.h), NULL = the model's own */
+    const char *button_codes;       /* MPU button codes (button_codes.h), NULL = the model's own */
+    uint32_t flash_id;              /* ROM1: answer to the flash ID command (0x06 written to 0xF8000000),
+                                     * 0 = none */
+    const uint32_t *adc_values;     /* DIGIC 6 ADC (0xD9800000): reading by channel, adc_count */
+    int adc_count;                  /* entries; NULL = channels read 0 */
+    const uint32_t *adc_ps_values;  /* PowerShot ADC (0xC0900040, half-word channels read in pairs): */
+    int adc_ps_count;               /* reading by channel; NULL = read 0 */
+    uint32_t adc_ps_battery;        /* PowerShot ADC 0xC09000B0 (battery voltage), 0 = reads 0 */
+    uint32_t quirks;                /* enum eos_quirk */
 
     union
     {
@@ -144,6 +200,14 @@ struct eos_model_desc {
 } __attribute__((packed));
 
 extern struct eos_model_desc eos_model_list[];
+
+/* init hooks (.init_hook) of the upstream models without a profile directory, in eos.c */
+void eos_init_7D(void);
+void eos_init_200D(void);
+void eos_init_EOSM3(void);
+void eos_init_EOSM10(void);
+void eos_init_EOSM5(void);
+void eos_init_5D3eeko(void);
 
 /* compile-time error if the size of params[] is smaller than
  * the size of the parameter struct in the above union.

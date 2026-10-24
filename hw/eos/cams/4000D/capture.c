@@ -1,10 +1,11 @@
 /*
  * Canon EOS 4000D 1.1.0: still-photo capture data for hw/eos/capture.c (docs/models/capture.md).
- * Selected by eos_model_desc.capture (model_list.c).
+ * Selected by eos_model_desc.capture (model.inc.c).
  */
 
 #include "qemu/osdep.h"
 #include "hw/eos/capture.h"
+#include "profile.h"
 
 const struct capture_profile capture_4000d = {
     .release_gpio       = 0xC022D0E8,       /* DIGIC 4+ style GPIO: 0x93D800 (set) / 0x83DC00 (clear) */

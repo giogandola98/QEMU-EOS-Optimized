@@ -2,18 +2,13 @@
 #define EOS_PM_H
 
 /*
- * Power-management models (Canon PowerMgr idle loop and selfRefresh deep sleep), one per camera.
- * A model is selected by eos_model_desc.pm_handler (model_list.c) and called by eos_handler()
+ * Power-management models (Canon PowerMgr idle loop and selfRefresh deep sleep), one per camera:
+ * hw/eos/cams/<CAM>/pm.c, declared in that profile's profile.h (signature: eos_pm_handler_fn,
+ * model_list.h). A model is selected by eos_model_desc.pm_handler and called by eos_handler()
  * for every MMIO access before the regular handlers. QEMU_EOS_PM_MODEL=0 disables it (A/B runs).
  */
 
 #include <stdbool.h>
-
-/* 1100D 1.0.5 (eos.c) */
-bool eos_pm_1100d(unsigned int address, unsigned char type, unsigned int value, unsigned int *ret);
-
-/* 4000D 1.1.0 (cams/pm_4000d.c) */
-bool eos_pm_4000d(unsigned int address, unsigned char type, unsigned int value, unsigned int *ret);
 
 /* Clock gate shared by the models: while set (selfRefresh wrote CLOCK_ENABLE = 0), the DIGIC timers,
  * the DryOS tick and the HPTimers stand still; other interrupts (MPU, keys) still arrive and wake the

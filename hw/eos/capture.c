@@ -15,7 +15,7 @@
  * No image processing happens and timing is not physical.
  *
  * Generic code only; the per-camera data (struct capture_profile, capture.h) is in
- * hw/eos/cams/capture_<cam>.c, selected by eos_model_desc.capture (model_list.c).
+ * hw/eos/cams/<CAM>/capture.c, selected by eos_model_desc.capture (the profile's model.inc.c).
  */
 
 #include <math.h>
