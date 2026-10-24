@@ -322,6 +322,15 @@ def main():
         mon = Monitor(mon_path)
         scr = Screen(mon, tmp, t0)
 
+        # Profiles whose first screen is not a sign of the GUI (EOSM: the LCD stays off in LiveView,
+        # so the boot frame never changes) name a UART line that must come first ("gui_uart").
+        if cam.get("gui_uart"):
+            uart_path = os.path.join(out, "uart.log")
+            tu = time.monotonic()
+            while not (os.path.exists(uart_path) and cam["gui_uart"].encode() in open(uart_path, "rb").read()):
+                if q.poll() is not None or time.monotonic() - tu > a.gui_timeout:
+                    raise RuntimeError("UART line %r not seen in %.0f s" % (cam["gui_uart"], a.gui_timeout))
+                time.sleep(a.poll)
         got = scr.wait_settled(a.poll, a.stable, a.gui_timeout, want=expect.get("gui"))
         if not got:
             raise RuntimeError("GUI not reached in %.0f s" % a.gui_timeout)

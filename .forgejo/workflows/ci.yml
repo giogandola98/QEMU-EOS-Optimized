@@ -50,6 +50,14 @@ jobs:
           src-checkout/ci/smoke.sh "$(cat .image)" 4000D
           echo "smoke test done in $(( $(date +%s) - start ))s"
 
+      - name: EOSM smoke test (boot to GUI, scripted scenarios)
+        env:
+          ROM_TOKEN: ${{ secrets.ROM_TOKEN }}
+        run: |
+          start=$(date +%s)
+          src-checkout/ci/smoke.sh "$(cat .image)" EOSM
+          echo "smoke test done in $(( $(date +%s) - start ))s"
+
       - name: Publish image (private registry)
         if: github.event_name == 'push'
         env:

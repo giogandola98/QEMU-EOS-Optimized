@@ -1,0 +1,24 @@
+{
+ "_comment": "EOS M test data for bench/bench.py (docs/models/PROFILES.md, docs/models/EOSM.md)",
+ "debugmsg": "0x40D4",
+ "_debugmsg": "DryosDebugMsg (copied to RAM at boot), platform/EOSM.202/stubs.S in Penumbra",
+ "gui_uart": "[STARTUP] startupInitializeComplete",
+ "_gui_uart": "the LCD stays off in LiveView (no sensor frames), so the boot screen says nothing about the GUI: wait for this UART line first",
+ "scenarios": [["menu", ["m"]], ["menu_right", ["right"]], ["menu_close", ["m"]], ["play", ["p"]], ["play_close", ["p"]],
+               ["quick", ["q"]], ["quick_close", ["q"]], ["info", ["i"]], ["info_lv", ["i"]]],
+ "uart_markers": ["K331 READY", "[STARTUP] startupInitializeComplete", "[MC] guimode comp. 0"],
+ "log_markers": ["GUI_Initialize", "DlgLiveView.c LOCAL_DIALOG_REFRESH_LV"],
+ "_expected": "frame name -> pixel hash (bench.py --expect). No gui hash: the boot frame is the LCD-off screen, whose first row shows RAM at the default VRAM address",
+ "expected": {
+  "menu": "0e542103a4bcf2f9",
+  "menu_right": "13227f3fcde2e892",
+  "menu_close": "ba9e32a353e9f880",
+  "play": "fef179d75b550f35",
+  "play_close": "05a51a86f50b6607",
+  "quick": "b7fd461c2b5851d8",
+  "quick_close": "05a51a86f50b6607",
+  "info": "432a669f8ed8b836",
+  "info_lv": "c43889750aa7d679",
+  "half_shutter": "c43889750aa7d679"
+ }
+}

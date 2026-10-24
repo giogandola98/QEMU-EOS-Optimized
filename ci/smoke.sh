@@ -4,7 +4,8 @@
 # test/smoke.sh adds the camera's own checks (1100D, 4000D: the deep sleep, where INFO turns the display
 # off, Canon's PowerMgr must enter and leave selfRefresh (DryosDebugMsg) and the INFO key that wakes it
 # must bring the shooting screen back; then a full shutter press must write a picture to the card,
-# docs/models/capture.md). SKIPPED (exit 0) without ROMs.
+# docs/models/capture.md; EOSM: MENU/PLAY/Q/INFO screens and a half-shutter press). SKIPPED (exit 0)
+# without ROMs.
 # Usage: ci/smoke.sh IMAGE [CAM]     CAM: a profile with test/smoke.sh (default 1100D)
 #                                    (needs ROM_TOKEN, SANDBOX)
 set -euo pipefail
