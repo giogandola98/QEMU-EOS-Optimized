@@ -8,6 +8,7 @@
 #include "eos.h"
 #include "model_list.h"
 #include "mpu.h"
+#include "capture.h"
 
 /* todo: understand the meaning of these spells,
  * rather than replaying them blindly */
@@ -97,6 +98,7 @@ static void mpu_send_next_spell(void)
         MPU_EPRINTF0(" (%s)\n", desc ? desc : KLRED"unnamed"KRESET);
 
         eos_state->mpu.out_char = -2;
+        capture_mpu_sent(eos_state->mpu.out_spell);
 
         /* request a SIO3 interrupt */
         /* use 100 here if brute-forcing MPU spells, to avoid overflowing Canon buffers */
@@ -181,6 +183,16 @@ static void mpu_start_sending(void)
     }
 }
 
+void mpu_queue_spell(const uint16_t *spell)
+{
+    mpu_enqueue_spell_generic((uint16_t *) spell);
+}
+
+void mpu_kick(void)
+{
+    mpu_start_sending();
+}
+
 static int match_spell(uint16_t *received, uint16_t *in_spell)
 {
     int n = MIN(in_spell[0], received[0]);
@@ -247,6 +259,8 @@ static void mpu_interpret_command(void)
     {
         MPU_EPRINTF0("%02x ", eos_state->mpu.recv_buffer[i]);
     }
+
+    capture_mpu_received(eos_state->mpu.recv_buffer, eos_state->mpu.recv_index);
     
     /* some spells may repeat; attempt to follow the sequence
      * by checking from where it left off at previous message */
@@ -945,6 +959,11 @@ static void show_keyboard_help(void)
 
 void mpu_send_keypress(int keycode)
 {
+    if (capture_handle_key(keycode))
+    {
+        return;
+    }
+
     /* good news: most MPU button codes appear to be the same across all cameras :) */
     int key = translate_scancode(keycode);
     if (key <= 0)

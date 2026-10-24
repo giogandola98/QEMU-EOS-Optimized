@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include "model_list.h"
 #include "pm.h"
+#include "capture.h"
 
 struct eos_model_desc eos_model_list[] = {
 /*************************** DIGIC II/III******************************/
@@ -211,6 +212,7 @@ struct eos_model_desc eos_model_list[] = {
     {
         .name                   = MODEL_NAME_1100D,
         .pm_handler             = eos_pm_1100d, /* PowerMgr idle loop + selfRefresh (eos.c) */
+        .capture                = &capture_1100d, /* shutter release (cams/capture_1100d.c) */
         .digic_version          = 4,
         .ram_size               = 0x08000000,   /* 128MB */
         .current_task_addr      = 0x1A2C,
@@ -255,6 +257,7 @@ struct eos_model_desc eos_model_list[] = {
          * 2000d_test by stephen-e). See docs/models/4000D.md. */
         .name                   = MODEL_NAME_4000D,
         .pm_handler             = eos_pm_4000d, /* PowerMgr idle loop + selfRefresh (cams/pm_4000d.c) */
+        .capture                = &capture_4000d, /* shutter release (cams/capture_4000d.c) */
         .digic_version          = 4,
         .ram_size               = 0x10000000,   /* 256MB */
         .rom0_size              = 0,            /* unpopulated: the dump is a 4-byte bus pattern */

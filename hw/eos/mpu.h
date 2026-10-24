@@ -17,6 +17,8 @@ unsigned int eos_handle_sio3(unsigned int parm, unsigned int address, unsigned c
 unsigned int eos_handle_mreq(unsigned int parm, unsigned int address, unsigned char type, unsigned int value);
 
 void mpu_send_keypress(int keycode);
+void mpu_queue_spell(const uint16_t *spell);   /* [0] = length, as in the spell tables */
+void mpu_kick(void);                            /* start sending queued spells */
 
 enum button_codes
 {

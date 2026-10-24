@@ -11,6 +11,7 @@
 #include "hw/hw.h"
 #include "eos.h"
 #include "engine.h"
+#include "capture.h"
 #include "model_list.h"
 #include "eos_utils.h"
 
@@ -136,11 +137,14 @@ static void gen_dark_frame(void *buf, int requested_width, int requested_height)
     uint16_t *buf16 = malloc(requested_width * requested_height * 2);
     assert(buf16);
 
+    /* deterministic (same bytes on every run, so captures can be compared) and cheap: a small
+     * fixed pattern around the black level instead of Gaussian noise from rand()
+     * todo: use model-specific white level, simulate ISO noise, pattern noise, hot pixels... */
+    uint32_t seed = 0x12345678;
     for (int i = 0; i < requested_width * requested_height; i++)
     {
-        /* todo: use model-specific white level,
-         * simulate ISO noise, pattern noise, hot pixels... */
-        buf16[i] = 2048 + RANDN * 8;
+        seed = seed * 1103515245 + 12345;
+        buf16[i] = 2048 + ((seed >> 16) & 15) - 8;
     }
 
     raw_pack14(buf16, buf, requested_width * requested_height);
@@ -186,7 +190,7 @@ static void load_fullres_14bit_raw(void *buf, int requested_width, int requested
         filename, requested_width, requested_height
     );
     int width, height;
-    uint16_t *pgm = load_pgm(filename, &width, &height);
+    uint16_t *pgm = access(filename, R_OK) == 0 ? load_pgm(filename, &width, &height) : NULL;
     if (pgm)
     {
         if (width != requested_width ||
@@ -569,11 +573,14 @@ static int edmac_do_transfer(int channel)
         }
         else
         {
-            fprintf(stderr, "[ENGINE] FIXME: returning dummy data on <%d>\n", conn);
             eos_state->edmac.conn_data[conn].buf = malloc(transfer_data_size);
             assert(eos_state->edmac.conn_data[conn].buf);
             eos_state->edmac.conn_data[conn].data_size = transfer_data_size;
-            memset(eos_state->edmac.conn_data[conn].buf, 0, transfer_data_size);
+            if (!capture_fill_conn(conn, eos_state->edmac.conn_data[conn].buf, transfer_data_size))
+            {
+                fprintf(stderr, "[ENGINE] FIXME: returning dummy data on <%d>\n", conn);
+                memset(eos_state->edmac.conn_data[conn].buf, 0, transfer_data_size);
+            }
         }
 
         if (eos_state->edmac.conn_data[conn].data_size < transfer_data_size)
@@ -1190,6 +1197,11 @@ unsigned int eos_handle_jpcore(unsigned int parm, unsigned int address, unsigned
         }
     }
 
+    if (parm == 0 && (type & MODE_WRITE))
+    {
+        capture_jpcore_write(address & 0xFFFF, value);
+    }
+
     /* common */
     switch(address & 0xFFFF)
     {
@@ -1236,6 +1248,10 @@ unsigned int eos_handle_jpcore(unsigned int parm, unsigned int address, unsigned
 
         case 0x0024:
             msg = "output size";
+            if (!(type & MODE_WRITE))
+            {
+                ret = capture_jpcore_output_size(ret);
+            }
             break;
 
         case 0x0030:
@@ -1258,6 +1274,7 @@ unsigned int eos_handle_jpcore(unsigned int parm, unsigned int address, unsigned
             {
                 ret = 0x400;
             }
+            ret = capture_jpcore_irq_status(ret);
             break;
 
         case 0x0080:
@@ -1316,6 +1333,7 @@ unsigned int eos_handle_head(unsigned int parm, unsigned int address, unsigned c
             msg = "Start?";
             if(type & MODE_WRITE)
             {
+                capture_head_start(interrupts[parm], value);
                 if (value == 0xC)
                 {
                     eos_trigger_int(interrupts[parm], 50);

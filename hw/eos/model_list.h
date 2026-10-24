@@ -64,9 +64,13 @@ enum { ram_extra_array_len = 2 };
 typedef bool (*eos_pm_handler_fn)(unsigned int address, unsigned char type, unsigned int value,
                                   unsigned int *ret);
 
+struct capture_profile;              /* still-photo capture data, hw/eos/capture.h */
+
 struct eos_model_desc {
     const char * name;
     eos_pm_handler_fn pm_handler;   /* model-specific only, not inherited from the DIGIC defaults */
+    const struct capture_profile *capture;  /* shutter release emulation (hw/eos/cams/capture_*.c);
+                                             * model-specific, NULL = none */
 
     union
     {

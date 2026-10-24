@@ -29,6 +29,7 @@
 #include "hw/eos/eos_bufcon_100D.h"
 #include "hw/eos/engine.h"
 #include "hw/eos/pm.h"
+#include "hw/eos/capture.h"
 
 #define IGNORE_CONNECT_POLL
 
@@ -2990,6 +2991,7 @@ unsigned int eos_handle_intengine(unsigned int parm, unsigned int address, unsig
                 msg = "Enabled interrupt %02Xh";
                 msg_arg1 = value;
                 eos_state->irq_enabled[value] = 1;
+                capture_irq_enabled(value);
 
                 /* we shouldn't reset s->irq_id here (we already reset it on read) */
                 /* if we reset it here also, it will trigger interrupt 0 incorrectly (on race conditions) */
@@ -3623,6 +3625,12 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
     const char *msg = NULL;
     const char *msg_lookup = 0;
     static int unk = 0;
+
+    /* shutter release lines (capture.c), model-specific */
+    if (capture_handle_gpio(address, type, value, &ret))
+    {
+        return ret;
+    }
 
     /* 0xC022009C/BC/C06C/D06C, depending on camera model */
     if (address == eos_state->model->mpu_request_register ||

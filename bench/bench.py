@@ -31,6 +31,9 @@ import subprocess
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))     # python3 -I drops the script dir
+import card     # noqa: E402  (SD card reader, bench/card.py)
+
 QEMU_EOS = os.environ.get("QEMU_EOS", "/opt/qemu-eos")
 
 # Per camera: scripted scenarios (name, keys) and markers expected in the UART log once the GUI is up.
@@ -245,8 +248,13 @@ def main():
                     help="TEXT=N: error unless qemu.log has at least N lines containing TEXT")
     ap.add_argument("--step", action="append", default=[],
                     help="after the idle window, in order: key:K (sendkey K), wait:S, shot:NAME (frame hash + "
-                         "PNG), mon:CMD (monitor command, output kept); --count texts are also counted per "
-                         "segment between steps")
+                         "PNG), mon:CMD (monitor command, output kept), until:TEXT[=N] (wait until qemu.log has "
+                         "N lines containing TEXT, default 1, at most --until-timeout s); --count texts are "
+                         "also counted per segment between steps")
+    ap.add_argument("--until-timeout", type=float, default=120.0)
+    ap.add_argument("--card", action="store_true",
+                    help="after QEMU exits: files and pictures (with EXIF exposure) on the SD card -> card.json")
+    ap.add_argument("--min-pictures", type=int, default=0, help="error unless the card has >= N DCIM pictures")
     a = ap.parse_args()
 
     cam = CAMS[a.cam]
@@ -344,6 +352,16 @@ def main():
                 mon.cmd("sendkey " + arg)
             elif kind == "wait":
                 time.sleep(float(arg))
+            elif kind == "until":       # anchored to the guest, not to a fixed delay (load-robust)
+                txt, n = arg.rsplit("=", 1) if "=" in arg else (arg, "1")
+                tu = time.monotonic()
+                while True:
+                    got = open(log, "rb").read().count(txt.encode())
+                    if got >= int(n):
+                        break
+                    if q.poll() is not None or time.monotonic() - tu > a.until_timeout:
+                        raise RuntimeError("step %s: %d of %s lines after %.0f s" % (st, got, n, time.monotonic() - tu))
+                    time.sleep(0.2)
             elif kind == "mon":         # e.g. mon:xp /8wx 0x2b60 (guest state, kept in result.json)
                 res.setdefault("monitor", []).append([arg, mon.cmd(arg).strip()])
             elif kind == "shot":
@@ -382,6 +400,13 @@ def main():
         for p in (mon_path, os.path.join(tmp, "screen.ppm")):
             if os.path.exists(p):
                 os.remove(p)
+        if a.card:
+            try:
+                res["card"] = {"files": card.Fat(disks["sd"]).files(), "pictures": card.pictures(disks["sd"])}
+                with open(os.path.join(out, "card.json"), "w") as f:
+                    json.dump(res["card"], f, indent=1)
+            except Exception as e:     # a broken card image is a test failure, not a crash
+                res["errors"].append("card: %s" % e)
         if not a.disk_dir:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -430,6 +455,9 @@ def main():
     for name, want in expect.items():
         if name in wanted and res["frames"].get(name) != want:
             res["errors"].append("frame %s: got %s, expected %s" % (name, res["frames"].get(name), want))
+    if a.min_pictures and len(res.get("card", {}).get("pictures", [])) < a.min_pictures:
+        res["errors"].append("card: %d pictures, expected >= %d" % (len(res.get("card", {}).get("pictures", [])),
+                                                                   a.min_pictures))
     for m, ok in res["uart_markers"].items():
         if not ok:
             res["errors"].append("UART marker missing: " + m)
