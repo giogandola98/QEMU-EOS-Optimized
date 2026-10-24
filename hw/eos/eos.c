@@ -4443,6 +4443,12 @@ unsigned int eos_handle_i2c(unsigned int parm, unsigned int address, unsigned ch
                     last_i2c_rxpos = 0;
                     msg_arg2 = (intptr_t)data;
                 }
+                else if ((value & 0x200) && EOS_QUIRK(I2C_TX_READY))
+                {
+                    /* transmit started: the EOS M audio IC driver (localI2C_Write) polls for
+                     * "TX data ready" before it writes the first byte, and gives up otherwise */
+                    last_i2c_status |= 0x10;
+                }
                 /* set receive mode */
                 else if(!(value & 0x200))
                 {

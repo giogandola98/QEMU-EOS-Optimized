@@ -106,6 +106,8 @@ enum eos_quirk {
     EOS_QUIRK_GPIO_VSW_6000     = 1 << 17,  /* GPIO 0xF480 (VSW status) reads 0x6000 (5D2, 50D) */
     EOS_QUIRK_GPIO_F48C_HDMI    = 1 << 18,  /* GPIO 0xF48C reads 0x4000000 (HDMI disconnected): skips
                                              * Canon's system check program (1300D, 4000D) */
+    EOS_QUIRK_I2C_TX_READY      = 1 << 19,  /* I2C 0xC0090000: "TX data ready" (status bit 4) is set
+                                             * when a transmit starts, before the first byte (EOSM) */
 };
 
 struct eos_model_desc {

@@ -1,9 +1,11 @@
 /*
- * Canon EOS M: entry of eos_model_list[]. Included by model_list.c inside the table, in the DIGIC 5
- * group: zero fields take the DIGIC 5 defaults. No hooks yet (generic behaviour, own MPU spells and
- * button codes). Profile layout: docs/models/PROFILES.md.
+ * Canon EOS M, fw 2.0.2, model ID 0x331: entry of eos_model_list[]. Included by model_list.c inside
+ * the table, in the DIGIC 5 group: zero fields take the DIGIC 5 defaults. Own MPU spells and button
+ * codes; needs SFDATA.BIN (serial flash with the property packages, test/sfdata_from_ram.py).
+ * Profile layout: docs/models/PROFILES.md; what was fixed and why: docs/models/EOSM.md.
  */
         .name                   = MODEL_NAME_EOSM,
+        .quirks                 = EOS_QUIRK_I2C_TX_READY,   /* audio IC init (InitializeAudioIC) */
         .digic_version          = 5,
         .ram_size               = 0x10000000,   /* 256MB */
         .current_task_addr      = 0x3DE78,
