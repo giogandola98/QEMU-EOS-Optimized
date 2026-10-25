@@ -959,6 +959,36 @@ bool eos_pm_clocks_gated(void)
     return eos_clocks_gated;
 }
 
+/* Did the guest run in the last interrupt timer step? Without -icount the virtual clock follows the host
+ * clock, and on a loaded host the vCPU thread may not run for many steps: true if it is idle (WFI) or its
+ * thread got at least half a step of CPU time since the last step that counted. */
+static bool eos_guest_progressed(void)
+{
+    static int64_t last_ns;
+    CPUState *cs = CPU(eos_state->cpu0);
+    clockid_t cid;
+    struct timespec ts;
+
+    if (cs->halted || !cs->thread ||
+        pthread_getcpuclockid(cs->thread->thread, &cid) || clock_gettime(cid, &ts))
+    {
+        return true;
+    }
+    int64_t now_ns = ts.tv_sec * 1000000000LL + ts.tv_nsec;
+    if (now_ns - last_ns >= DIGIC_TIMER_STEP * 1000 / 2)
+    {
+        last_ns = now_ns;
+        return true;
+    }
+    return false;
+}
+
+void eos_trigger_int_after_progress(unsigned int id, unsigned int steps)
+{
+    assert(id < INT_ENTRIES);
+    eos_state->irq_after_progress[id] = MAX(steps, 1);
+}
+
 static void eos_interrupt_timer_body(void)
 {
     {
@@ -999,7 +1029,25 @@ static void eos_interrupt_timer_body(void)
             }
         }
 
-        // go through all interrupts and check if they are pending/scheduled
+        // interrupts that wait for the guest to have run (eos_trigger_int_after_progress)
+        {
+            int progressed = -1;
+            for (pos = 1; pos < INT_ENTRIES; pos++)
+            {
+                if (eos_state->irq_after_progress[pos])
+                {
+                    if (progressed < 0)
+                    {
+                        progressed = eos_guest_progressed();
+                    }
+                    if (progressed && !--eos_state->irq_after_progress[pos])
+                    {
+                        eos_trigger_int(pos, 0);
+                    }
+                }
+            }
+        }
+
         for(pos = INT_ENTRIES-1; pos > 0; pos--)
         {
             if (gated && pos == TIMER_INTERRUPT)

@@ -55,6 +55,7 @@ static struct
     int jpeg_len;
     int jpeg_pos;
     int jpeg_done;
+    int jp_configured;              /* JP51 frame size written since the current run's output started */
     int8_t shot_level[256];         /* placeholder level of each shot; the JPEG runs come in shot order,
                                      * possibly after the next release has started */
     int main_runs;                  /* full-size JPEG runs so far */
@@ -524,7 +525,9 @@ int capture_handle_gpio(unsigned int address, unsigned char type, unsigned int v
             {
                 CAP_LOG("exposure (CAPREADY)\n");
                 cap.exposing = 1;
-                eos_trigger_int(p->capready_irq, 10);
+                /* after the guest has run on: it marks the exposure as started (the flag CapReady
+                 * checks, "CapReady Interrupt Error!!" otherwise) only after lowering the line */
+                eos_trigger_int_after_progress(p->capready_irq, 10);
             }
             else
             {
@@ -727,6 +730,12 @@ void capture_jpcore_write(unsigned int offset, unsigned int value)
     if (offset < 0x1000 && profile())
     {
         cap.jp_regs[offset / 4] = value;
+        if (offset == 0x080)
+        {
+            /* frame size: the guest configures a run (an output transfer after the end of the
+             * previous one may still belong to that one: continuation chunks of a small output) */
+            cap.jp_configured = 1;
+        }
     }
 }
 
@@ -848,11 +857,13 @@ int capture_fill_conn(int conn, void *buf, int size)
     {
         return 0;
     }
-    if (!cap.jpeg || cap.jpeg_done)
+    /* the output EDMAC starts before the JPEG core, so the first transfer of a run comes here; with an
+     * input model (jpcore_in_conns) a run is over once the guest has configured the next one */
+    if (!cap.jpeg || (cap.jpeg_done && (cap.jp_configured || !cap.p->jpcore_in_conns[0])))
     {
-        /* the output EDMAC starts before the JPEG core, so the first transfer of a run comes here */
         jpcore_new_output();
         cap.jpeg_done = 0;
+        cap.jp_configured = 0;
     }
     memset(buf, 0, size);
     int n = MIN(size, cap.jpeg_len - cap.jpeg_pos);

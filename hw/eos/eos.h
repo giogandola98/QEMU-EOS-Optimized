@@ -328,6 +328,7 @@ typedef struct EOSState
     uint32_t tio_rxbyte;
     uint32_t irq_enabled[INT_ENTRIES];
     uint32_t irq_schedule[INT_ENTRIES];
+    uint32_t irq_after_progress[INT_ENTRIES];   /* eos_trigger_int_after_progress countdowns */
     uint32_t irq_id;
     uint32_t digic_timer20;
     uint32_t digic_timer32;
@@ -462,6 +463,10 @@ unsigned int eos_default_handle(unsigned int address, unsigned char type, unsign
 EOSRegionHandler *eos_find_handler(unsigned int address);
 unsigned int eos_handler(unsigned int address, unsigned char type, unsigned int value);
 unsigned int eos_trigger_int(unsigned int id, unsigned int delay);
+/* like eos_trigger_int, but the delay counts only interrupt timer steps in which the guest ran (or
+ * idled): for device responses that must come after the guest has done the work that follows its
+ * request, however slowly the host runs the guest against the (host-clock based) virtual time */
+void eos_trigger_int_after_progress(unsigned int id, unsigned int steps);
 unsigned int flash_get_blocksize(unsigned int rom, unsigned int size, unsigned int word_offset);
 
 void eos_load_image(const char* file, int offset, int max_size, uint32_t addr, int swap_endian);
