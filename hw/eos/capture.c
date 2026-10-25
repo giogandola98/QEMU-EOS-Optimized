@@ -857,9 +857,9 @@ int capture_fill_conn(int conn, void *buf, int size)
     {
         return 0;
     }
-    /* the output EDMAC starts before the JPEG core, so the first transfer of a run comes here; with an
-     * input model (jpcore_in_conns) a run is over once the guest has configured the next one */
-    if (!cap.jpeg || (cap.jpeg_done && (cap.jp_configured || !cap.p->jpcore_in_conns[0])))
+    /* the output EDMAC starts before the JPEG core, so the first transfer of a run comes here; a run
+     * is over once the core has completed it and the guest has configured the next one */
+    if (!cap.jpeg || (cap.jpeg_done && cap.jp_configured))
     {
         jpcore_new_output();
         cap.jpeg_done = 0;
