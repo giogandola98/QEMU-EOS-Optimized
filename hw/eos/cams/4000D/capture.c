@@ -18,5 +18,6 @@ const struct capture_profile capture_4000d = {
     .eshut_offset       = 0x2B,
     .jpcore_irq_status  = 0x400,
     .jpcore_conn        = 5,
+    .jpcore_in_conns    = { 16, 3 },        /* YUV of the picture (top and bottom halves), thumbnail */
     /* exposure: the MPU init (600D-derived table) sends PROP_SHUTTER/APERTURE/ISO */
 };

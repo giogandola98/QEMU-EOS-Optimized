@@ -21,6 +21,8 @@ struct capture_profile
                                      * the capture path the firmware expects */
     unsigned int jpcore_irq_status; /* JP51 0x44 at the end of a run: 0x400 = done */
     int jpcore_conn;                /* EDMAC connection of the JPEG core output */
+    int jpcore_in_conns[4];         /* EDMAC connections into the JPEG core (0-terminated; none = off):
+                                     * the output's completion waits for a whole frame of input */
     int init_tv, init_av, init_iso; /* exposure until a property message says otherwise: what Canon
                                      * restores from its settings when the MPU init does not send it
                                      * (0 = the MPU init sends it) */
@@ -36,6 +38,10 @@ void capture_mpu_sent(const uint16_t *msg);
 /* the guest enabled an interrupt at the interrupt controller */
 void capture_irq_enabled(int irq);
 
+/* HPTimer `id` set to fire at `compare` (DIGIC 20-bit microsecond counter), and when it fired */
+void capture_hptimer_armed(int id, uint32_t compare);
+void capture_hptimer_fired(int id);
+
 /* HEAD timer start register written (value 0xC = start); irq = its interrupt */
 void capture_head_start(int irq, unsigned int value);
 
@@ -48,5 +54,10 @@ void capture_jpcore_write(unsigned int offset, unsigned int value);
 int capture_fill_conn(int conn, void *buf, int size);
 unsigned int capture_jpcore_irq_status(unsigned int dflt);
 unsigned int capture_jpcore_output_size(unsigned int dflt);
+
+/* EDMAC: a read transfer into connection `conn`; a write transfer from `conn` done in `delay` steps,
+ * 1 if its completion interrupt is held back (the capture model raises it later) */
+void capture_edmac_read(int conn, int size);
+int capture_edmac_write_held(int channel, int conn, int delay);
 
 #endif

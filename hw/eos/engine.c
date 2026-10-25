@@ -216,7 +216,7 @@ unsigned int eos_handle_cartridge(unsigned int parm, unsigned int address, unsig
     return 0;
 }
 
-static void edmac_trigger_interrupt(int channel, int delay)
+void edmac_trigger_interrupt(int channel, int delay)
 {
     /* from register_interrupt calls */
     const int edmac_interrupts[] = {
@@ -534,6 +534,7 @@ static int edmac_do_transfer(int channel)
                 }
             }
         }
+        capture_edmac_read(conn, transfer_data_size);
         fprintf(stderr, "[EDMAC#%d] %d bytes read from %X-%X.\n",
                 channel, transfer_data_size,
                 eos_state->edmac.ch[channel].addr,
@@ -660,6 +661,10 @@ static int edmac_do_transfer(int channel)
 
     fprintf(stderr, "[EDMAC#%d] transfer delay %d x 256 us.\n", channel, delay);
 
+    if (!(channel & 8) && capture_edmac_write_held(channel, conn, delay))
+    {
+        return 1;               /* the capture model raises it once the JPEG core has its input */
+    }
     edmac_trigger_interrupt(channel, delay);
     return 1;
 }

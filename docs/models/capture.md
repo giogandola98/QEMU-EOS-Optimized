@@ -20,12 +20,12 @@ timer start, deterministic dark frame).
 | release | `scsReleaseOn`, `scsReleaseStart`, `StartupCaptureDevice` | MPU: `EVENTID_RELEASE_ON` (`05 01`), `EVENTID_RELEASE_START` (`05 0e`, ShootCapture input 1) |
 | exposure data | `scsReleaseData`, `CreateJob`, `iso:..,tv:..,av:..` | MPU: `EVENTID_RELEASE_DATA_SW2ON` (`05 02`), payload 0x2D bytes: Tv `[0]`, Av `[1]`, ISO `[4]`, temperature `[23]`, `[25]`; `[0x2B]` = add_size 1, `[0x2C]` = 1 (electronic first curtain path; without it the 1100D asserts in CaptureState.c) |
 | sensor ready | 1100D `EShutCapture` / 4000D `NormalCapture`, `VSizeSetting` | the DIGIC clears a "release" GPIO line (1100D `0xC02200EC` bit 1; 4000D `0xC022D0E8`, DIGIC 4+ values `0x93D800` → `0x83DC00`); the line must read back what was written (the 1100D checks the pin mode bits first) |
-| exposure | `scsCapReady`, `Start Loop dwVDCount = n` | `CAPREADY` interrupt 0x51, fired on that falling edge. Exposures longer than a frame period count VD (HEAD1, 0x6A) interrupts: during a release a started HEAD timer repeats (its period long enough that Canon's own "last VD" HPTimer comes first, as on the camera) until the readout is done |
+| exposure | `scsCapReady`, `Start Loop dwVDCount = n` | `CAPREADY` interrupt 0x51, fired on that falling edge. Exposures longer than a frame period count VD (HEAD1, 0x6A) interrupts: during a release a started HEAD timer repeats until the readout is done, each period (256 ms) counted from the last HPTimer the firmware armed in the exposure, so Canon's own "last VD" HPTimer (rest of the exposure time) comes before another VD, as on the camera; a HEAD timer stopped during a release drops its pending VD |
 | bulb | `scsBulbEnd`, `Accumulation Stop`, `Last VD Count` | Tv = BULB (0x0C): SW2 off sends `EVENTID_BULB_END` (`05 05`); if SW2 goes off before the exposure has started (the emulated release is slower than the camera's) it is sent at the first VD period |
 | readout | EDMAC#2 raw (`[CAPTURE] Generating a WxH dark frame`), `CapEnd`, `scsFinalReadoutDone` | existing EDMAC/PREPRO model; the raw frame is a fixed pseudo-random pattern around black (was Gaussian noise from `rand()`: slow, and different every run) |
 | shutter closed | `scsAfterReleaseDataCBR`, `cam event after data` | on the next falling edge of the release line: `EVENTID_AFTER_RELEASE_DATA` (`05 03`), `EVENTID_RELEASE_END` (`05 0f`) |
 | fencing / face detection | `[FB] START`, `[FB] FencingCompleteCBR` | Fencing_A/B/C (0xC9/0xD0/0xD1) fire once per operation: on the enable that starts it, not on DryOS' re-enable after the handler |
-| compression | `[TTJ] ... JpCoreCompleteCBR( size )`, `JPEG(4272,2848,..)` | JP51 `0x44` = 0x400 (done; was `rand()` on the 1100D), `0x24` = output size. The output (EDMAC connection 5) is a valid baseline grayscale JPEG of the size in JP51 `0x080` (height << 16, width), uniform level: 128 for the first shot, 16 levels per stop of exposure difference from it (Tv, Av, ISO latched at the release), so bracketed frames differ. The firmware checks that it starts with `FF D8 FF DB`. Lossless runs (JP51 `0x004` low bits = 2, the CR2 raw) get 256 KiB of zeros |
+| compression | `[TTJ] ... JpCoreCompleteCBR( size )`, `JPEG(4272,2848,..)` | JP51 `0x44` = 0x400 (done; was `rand()` on the 1100D), `0x24` = output size. The output (EDMAC connection 5) is a valid baseline grayscale JPEG of the size in JP51 `0x080` (height << 16, width), uniform level: 128 for the first shot, 16 levels per stop of exposure difference from it (Tv, Av, ISO latched at the release), so bracketed frames differ. The firmware checks that it starts with `FF D8 FF DB`. Lossless runs (JP51 `0x004` low bits = 2, the CR2 raw) get 256 KiB of zeros. The output EDMAC completes only once the core has had a frame of input (width x height x 2 bytes of YUV on `jpcore_in_conns`; the 4000D feeds the picture as top and bottom halves, two TwoInTwoOut jobs, and expects the output "pop" to complete after the bottom half) |
 | file | `B:/DCIM/100EOS5D/IMG_nnnn.CR2 write done` | existing SD model |
 | SW2/SW1 off | `scsReleaseOff`, `cam event release end` | on key release: `05 04`, `05 0b`; while a release runs they are held back until its end (else `ERROR scsEventDispatch ... dwEventID=18`) |
 | remote release (ML `call("Release")`, PTP, ML `SW1()`/`SW2()`) | `Release`, `REMOTE_RELEASE_OK` | DIGIC → MPU `PROP_REMOTE_SW1` (`04 16`) / `PROP_REMOTE_SW2` (`04 17`): the MPU answers with the same property carrying 0 (the PTP layer reads it as the result; the value itself gives `REMOTE_RELEASE NG`) and plays SW1 on / the release / SW2 off / SW1 off |
@@ -52,6 +52,14 @@ write after the first release. F5..F8 queue the MPU messages listed in `$QEMU_EO
 - No image processing: the sensor data is a fixed pattern, the JPEG a uniform gray frame, the CR2 raw data
   zeros; nothing is developed from the sensor data. Playback of these files shows Canon's decode error (JPEG
   decoding is not emulated).
+- Order, not timing: without `-icount` QEMU's virtual time follows the host clock, so a loaded host
+  runs fewer guest instructions per emulated millisecond. The model therefore orders its events by what the
+  guest did, not by fixed delays: the next VD waits for the firmware's pending HPTimers (above) and a
+  stopped HEAD timer's pending VD is dropped. With fixed delays (a 256 ms period from the last VD) a slow
+  guest armed its "last VD" timer too late, an extra VD reached the loop (`VD Int(7235)(1)` after
+  `Last VD Count`, then `Start Loop dwVDCount = 0, -1, ...`) and the picture was never written; a stale VD
+  of the previous stage had the same effect. Reproduced by starving only the vCPU thread (pinned to a busy
+  CPU at nice 19, the main loop free). The JPEG output (compression, above) is ordered the same way.
 - Timing is not physical: an exposure takes as many VD periods as Canon programs, at the emulator's period,
   not the shutter speed; a bulb exposure ends when SW2 goes off (or at the first VD period if that was
   earlier), so the EXIF exposure time of a bulb shot is not what was requested.
@@ -59,8 +67,9 @@ write after the first release. F5..F8 queue the MPU messages listed in `$QEMU_EO
   4000D), no LiveView capture, no flash, no continuous drive, no mirror lockup, no dark-frame noise reduction
   beyond what the firmware does with the dummy frame.
 - Exposure in auto modes is whatever the MPU last reported (no metering); in M mode it is exactly what was set.
-- 4000D: back-to-back releases (ML HDR) are captured with the right exposures, but developing the overlapping
-  pictures to files stalls in about one run in three (TwoInTwoOut JPEG path: EDMAC/JPEG-core completions of
-  overlapping runs get attributed to the wrong run in the engine model); spaced shots
-  (intervalometer, single presses) are reliable. The 1100D develops back-to-back frames reliably.
+- 4000D back-to-back releases (ML HDR) are developed to files like spaced shots. They used to stall in about
+  one run in three: the JPEG output's completion was timed from its own transfer only, so it could come
+  during the top half's job (`[TTJ][150,..] Write1Complete(POP)CBR`) and the bottom half's job then
+  waited for it forever; whether it did depended on how fast the guest ran, as for a single shot on a
+  loaded host.
 - Other cameras: `capture_profile = 0`, unchanged behaviour.

@@ -33,10 +33,6 @@
 
 #define IGNORE_CONNECT_POLL
 
-#define DIGIC_TIMER_STEP 0x100
-#define DIGIC_TIMER20_MASK (0x000FFFFF & ~(DIGIC_TIMER_STEP-1))
-#define DIGIC_TIMER32_MASK (0xFFFFFFFF & ~(DIGIC_TIMER_STEP-1))
-
 static void eos_init_common(void);
 static void *eos_init_cpu(void);
 
@@ -1089,6 +1085,7 @@ static void eos_interrupt_timer_body(void)
                     fprintf(stderr, "[HPTimer] Firing HPTimer #%d\n", pos);
                 }
                 eos_state->HPTimers[pos].triggered = 1;
+                capture_hptimer_fired(pos);
                 int interrupt = hptimer_interrupts[pos];
                 assert(interrupt > 0);
                 assert(interrupt < COUNT(trigger_hptimers));
@@ -3298,6 +3295,7 @@ unsigned int eos_handle_hptimer(unsigned int parm, unsigned int address, unsigne
                     /* workaround: when this happens, trigger right away */
                     eos_state->HPTimers[timer_id].output_compare = eos_state->digic_timer20 + DIGIC_TIMER_STEP;
                 }
+                capture_hptimer_armed(timer_id, eos_state->HPTimers[timer_id].output_compare);
 
                 msg = "HPTimer #%d: output compare (delay %d microseconds)";
                 msg_arg2 = value - eos_state->digic_timer20_last_read;

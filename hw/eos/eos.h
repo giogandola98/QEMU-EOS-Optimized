@@ -13,6 +13,12 @@
 #include "hw/eos/model_list.h" // only for ram_extra_array_len enum
 
 /** Helper macros **/
+/* the emulated clock: interrupt timer period and DIGIC timer resolution, microseconds; the 20-bit
+ * (HPTimer) and 32-bit (UTimer) counters advance by one step per period */
+#define DIGIC_TIMER_STEP 0x100
+#define DIGIC_TIMER20_MASK (0x000FFFFF & ~(DIGIC_TIMER_STEP-1))
+#define DIGIC_TIMER32_MASK (0xFFFFFFFF & ~(DIGIC_TIMER_STEP-1))
+
 #define COUNT(x)        ((int)(sizeof(x)/sizeof((x)[0])))
 
 #define STR_APPEND(orig,fmt,...) ({ int _len = strlen(orig); snprintf(orig + _len, sizeof(orig) - _len, fmt, ## __VA_ARGS__); });

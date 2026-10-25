@@ -21,10 +21,12 @@
 #include <math.h>
 #include "qemu/osdep.h"
 #include "qemu/log.h"
+#include "qemu/timer.h"
 #include "eos.h"
 #include "model_list.h"
 #include "mpu.h"
 #include "capture.h"
+#include "engine.h"
 
 #define CAP_LOG(fmt, ...) fprintf(stderr, "[CAPTURE] " fmt, ## __VA_ARGS__)
 #define CAP_TRACE(fmt, ...) do { if (cap.trace) CAP_LOG(fmt, ## __VA_ARGS__); } while (0)
@@ -40,6 +42,8 @@ static struct
     uint32_t release_line;
     uint8_t inflight[0x200];        /* completion interrupt fired, waiting for its re-enable */
     uint8_t head_running[0x200];    /* HEAD timer started: its interrupt repeats until stopped */
+    uint32_t hpt_pending;           /* HPTimers armed during the exposure that have not fired yet */
+    uint32_t hpt_compare[32];       /* ... and when they fire (DIGIC 20-bit microsecond counter) */
     int sw_held;                    /* full-shutter key held */
     int releasing;                  /* between RELEASE_START and RELEASE_END */
     int sw2_off_pending;            /* SW2 went off during the release: the MPU reports it at its end */
@@ -57,7 +61,12 @@ static struct
     double first_stops;             /* exposure of the first shot (placeholder level reference) */
     int last_level;
     uint32_t jp_regs[0x400];        /* JP51 register writes */
-} cap = { .tv = 0x68, .av = 0x30, .iso = 0x48 };
+    /* JPEG core input of the current run; the output's completion waits for all of it */
+    int64_t jp_in_bytes, jp_in_needed;
+    int jp_held_channel;            /* output EDMAC channel whose completion is held back, -1 = none */
+    uint32_t jp_held_due;           /* when its transfer would have completed (DIGIC 32-bit counter) */
+    QEMUTimer *jp_held_timer;       /* fallback, should the input never be complete */
+} cap = { .tv = 0x68, .av = 0x30, .iso = 0x48, .jp_held_channel = -1 };
 
 static const struct capture_profile *profile(void)
 {
@@ -144,6 +153,7 @@ static void release_start(int tv, int av, int iso)
     cap.release_edges = 0;
     cap.releasing = 1;
     cap.exposing = 0;
+    cap.hpt_pending = 0;
     cap.bulb_end_pending = 0;
     CAP_LOG("shot %d: tv=0x%02X av=0x%02X iso=0x%02X ae=0x%02X mode=%d (%+.2f EV)\n",
             cap.shots, tv, av, iso, cap.ae, cap.mode, exposure_stops(tv, av, iso));
@@ -405,12 +415,91 @@ void capture_mpu_sent(const uint16_t *msg)
 /* ---------------------------------------------------------------------------------------- */
 /* DIGIC side                                                                                */
 
+/* HEAD (VD) period during a release, in interrupt timer steps (DIGIC_TIMER_STEP): 256 ms */
+#define VD_PERIOD 1000
+
+/* steps until the DIGIC 20-bit microsecond counter reaches t (<= 0: reached) */
+static int steps_until(uint32_t t)
+{
+    int us = ((int32_t) ((t - eos_state->digic_timer20) << 12)) >> 12;
+    return us > 0 ? DIV_ROUND_UP(us, DIGIC_TIMER_STEP) : 0;
+}
+
+/* Steps until the next VD of a running HEAD timer: a period, counted from the last of Canon's
+ * HPTimers still pending in the exposure. The firmware ends the exposure with its own "last VD"
+ * HPTimer (armed on the last VD, for the rest of the exposure time), which on the camera always
+ * comes before another VD. Counting the period from it keeps that order whatever the length of
+ * the exposure and however much virtual time the guest takes between the VD and arming the timer
+ * (that time grows when the host is loaded: virtual time follows the host clock). */
+static int vd_delay(void)
+{
+    int delay = VD_PERIOD;
+    for (int id = 0; id < COUNT(cap.hpt_compare); id++)
+    {
+        if (cap.hpt_pending & (1u << id))
+        {
+            int left = steps_until(cap.hpt_compare[id]);
+            if (left)
+            {
+                delay = MAX(delay, left + VD_PERIOD);
+            }
+            else
+            {
+                cap.hpt_pending &= ~(1u << id);     /* passed (fired, or disarmed by the guest) */
+            }
+        }
+    }
+    return delay;
+}
+
+void capture_hptimer_armed(int id, uint32_t compare)
+{
+    const struct capture_profile *p = profile();
+    if (!p || id < 0 || id >= COUNT(cap.hpt_compare) || !cap.exposing || !cap.head_running[p->vd_irq])
+    {
+        return;
+    }
+    cap.hpt_pending |= 1u << id;
+    cap.hpt_compare[id] = compare;
+
+    /* a VD already scheduled (or due, not yet taken) waits for it */
+    uint32_t *sched = &eos_state->irq_schedule[p->vd_irq];
+    if (*sched)
+    {
+        int delay = vd_delay();
+        if (delay > (int) *sched)
+        {
+            CAP_TRACE("HPTimer #%d armed for %d steps: VD in %d steps (was %d)\n",
+                      id, steps_until(compare), delay, *sched);
+            *sched = delay;
+        }
+    }
+}
+
+void capture_hptimer_fired(int id)
+{
+    if (id >= 0 && id < COUNT(cap.hpt_compare))
+    {
+        cap.hpt_pending &= ~(1u << id);
+    }
+}
+
 void capture_head_start(int irq, unsigned int value)
 {
     if (profile() && irq > 0 && irq < COUNT(cap.head_running))
     {
         /* only during a release: outside of it the emulator keeps its one-shot HEAD behaviour */
         cap.head_running[irq] = (value == 0xC) && cap.releasing && irq == cap.p->vd_irq;
+
+        /* stopped during a release: the VD it had scheduled does not come. Left pending, it would
+         * reach the handler of the next stage, which registers it before starting the timer again
+         * (seen when the guest runs slowly against the clock: VD counts go wrong, the exposure
+         * loop never ends) */
+        if (value != 0xC && cap.releasing && irq == cap.p->vd_irq && eos_state->irq_schedule[irq])
+        {
+            CAP_TRACE("HEAD stopped: pending VD dropped\n");
+            eos_state->irq_schedule[irq] = 0;
+        }
     }
 }
 
@@ -441,6 +530,7 @@ int capture_handle_gpio(unsigned int address, unsigned char type, unsigned int v
             {
                 CAP_LOG("readout done\n");
                 cap.exposing = 0;
+                cap.hpt_pending = 0;
                 memset(cap.head_running, 0, sizeof(cap.head_running));
                 release_end();
             }
@@ -467,8 +557,8 @@ void capture_irq_enabled(int irq)
      * the next period (long exposures count several VD periods before the readout) */
     if (cap.head_running[irq])
     {
-        /* period: long enough that Canon's HPTimer-based "last VD" timer wins, as on the camera */
-        eos_trigger_int(irq, 1000);
+        /* Canon's HPTimer-based "last VD" timer comes first, as on the camera (vd_delay) */
+        eos_trigger_int(irq, vd_delay());
         if (cap.bulb_end_pending && cap.exposing)
         {
             bulb_end();
@@ -640,6 +730,84 @@ void capture_jpcore_write(unsigned int offset, unsigned int value)
     }
 }
 
+/* The JPEG core's output EDMAC completes when the core has compressed its whole input, which the
+ * firmware may feed in several transfers: the 4000D compresses a picture from its top and bottom
+ * halves (two jobs of its TwoInTwoOut path, the bottom half read only once its YUV is developed) into
+ * one output, which it "pops" after the first half and expects to complete after the second. The
+ * transfer delay of the output alone (data size / 200 MB/s) made that completion come after the
+ * bottom half only when the guest ran fast enough: on a slow guest it came during the top half's job
+ * and the bottom half waited for it forever. Here it waits for a frame of input (width x height x 2
+ * bytes of YUV 4:2:2 on the profile's input connections) since the run started. */
+#define JP_HOLD_FALLBACK_NS (20 * NANOSECONDS_PER_SECOND)
+
+static int is_jpcore_input(int conn)
+{
+    for (int i = 0; i < COUNT(cap.p->jpcore_in_conns) && cap.p->jpcore_in_conns[i]; i++)
+    {
+        if (cap.p->jpcore_in_conns[i] == conn)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void jp_release(const char *why)
+{
+    int ch = cap.jp_held_channel;
+    if (ch < 0)
+    {
+        return;
+    }
+    int us = (int32_t) (cap.jp_held_due - eos_state->digic_timer32);
+    int delay = MAX(DIV_ROUND_UP(MAX(us, 0), DIGIC_TIMER_STEP), 1);
+    CAP_TRACE("JPCORE output EDMAC#%d completes in %d steps (%s, input %" PRId64 " of %" PRId64 ")\n",
+              ch, delay, why, cap.jp_in_bytes, cap.jp_in_needed);
+    cap.jp_held_channel = -1;
+    timer_del(cap.jp_held_timer);
+    edmac_trigger_interrupt(ch, delay);
+}
+
+static void jp_release_fallback(void *opaque)
+{
+    CAP_LOG("JPCORE input incomplete (%" PRId64 " of %" PRId64 " bytes): output completes anyway\n",
+            cap.jp_in_bytes, cap.jp_in_needed);
+    jp_release("fallback");
+}
+
+void capture_edmac_read(int conn, int size)
+{
+    if (profile() && cap.jp_in_needed && is_jpcore_input(conn))
+    {
+        cap.jp_in_bytes += size;
+        if (cap.jp_held_channel >= 0 && cap.jp_in_bytes >= cap.jp_in_needed)
+        {
+            jp_release("input complete");
+        }
+    }
+}
+
+int capture_edmac_write_held(int channel, int conn, int delay)
+{
+    const struct capture_profile *p = profile();
+    if (!p || conn != p->jpcore_conn || !p->jpcore_in_conns[0] ||
+        !cap.jp_in_needed || cap.jp_in_bytes >= cap.jp_in_needed)
+    {
+        return 0;
+    }
+    jp_release("next output transfer");
+    if (!cap.jp_held_timer)
+    {
+        cap.jp_held_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL, jp_release_fallback, NULL);
+    }
+    cap.jp_held_channel = channel;
+    cap.jp_held_due = eos_state->digic_timer32 + delay * DIGIC_TIMER_STEP;
+    timer_mod(cap.jp_held_timer, qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) + JP_HOLD_FALLBACK_NS);
+    CAP_TRACE("JPCORE output EDMAC#%d: completion waits for the input (%" PRId64 " of %" PRId64 ")\n",
+              channel, cap.jp_in_bytes, cap.jp_in_needed);
+    return 1;
+}
+
 /* placeholder output for the run the guest configured: size from JP51 0x080 (height << 16 | width),
  * mode from 0x004 (2 = lossless, the CR2 raw path: zeros of a fixed size) */
 static void jpcore_new_output(void)
@@ -647,6 +815,10 @@ static void jpcore_new_output(void)
     uint32_t mode = cap.jp_regs[0x004 / 4];
     int width = cap.jp_regs[0x080 / 4] & 0xFFFF;
     int height = cap.jp_regs[0x080 / 4] >> 16;
+
+    jp_release("next run");
+    cap.jp_in_bytes = 0;
+    cap.jp_in_needed = (mode & 0xF) == 2 ? 0 : (int64_t) width * height * 2;
 
     if ((mode & 0xF) == 2)
     {
