@@ -2,7 +2,7 @@
  * Canon EOS M, fw 2.0.2, model ID 0x331: entry of eos_model_list[]. Included by model_list.c inside
  * the table, in the DIGIC 5 group: zero fields take the DIGIC 5 defaults. Own MPU spells and button
  * codes; needs SFDATA.BIN (serial flash with the property packages); LV.422 / HD.422 (optional) are
- * injected into the LiveView buffers (lv.c).
+ * injected into the LiveView buffers (lv.c); the Eeko core's mailbox is answered (eeko.c, docs/models/eeko.md).
  * Profile layout: docs/models/PROFILES.md; what was fixed and why: docs/models/EOSM.md.
  */
         .name                   = MODEL_NAME_EOSM,
