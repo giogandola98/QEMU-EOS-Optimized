@@ -3,22 +3,23 @@
  "debugmsg": "0x40D4",
  "_debugmsg": "DryosDebugMsg (copied to RAM at boot), platform/EOSM.202/stubs.S in Penumbra",
  "gui_uart": "[STARTUP] startupInitializeComplete",
- "_gui_uart": "the LCD stays off in LiveView (no sensor frames), so the boot screen says nothing about the GUI: wait for this UART line first",
+ "_gui_uart": "the screen changes while LiveView starts at boot: wait for this UART line first",
  "scenarios": [["menu", ["m"]], ["menu_right", ["right"]], ["menu_close", ["m"]], ["play", ["p"]], ["play_close", ["p"]],
                ["quick", ["q"]], ["quick_close", ["q"]], ["info", ["i"]], ["info_lv", ["i"]]],
  "uart_markers": ["K331 READY", "[STARTUP] startupInitializeComplete", "[MC] guimode comp. 0"],
  "log_markers": ["GUI_Initialize", "DlgLiveView.c LOCAL_DIALOG_REFRESH_LV"],
- "_expected": "frame name -> pixel hash (bench.py --expect). No gui hash: the boot frame is the LCD-off screen, whose first row shows RAM at the default VRAM address",
+ "_expected": "frame name -> pixel hash (bench.py --expect). LiveView frames (gui, menu_close, play_close, info_lv, half_shutter) show Canon's overlays over the muted grey display: Canon turns the LCD on with mute once LiveView white balance has started on Eeko (hw/eos/eeko.c) and keeps it muted because no sensor frame reaches its pipeline",
  "expected": {
+  "gui": "db0bcda2b8e3bd47",
   "menu": "0e542103a4bcf2f9",
   "menu_right": "13227f3fcde2e892",
-  "menu_close": "598eac72fa4a8959",
+  "menu_close": "41511f2ade7c4f5c",
   "play": "fef179d75b550f35",
-  "play_close": "6522790935fe45a2",
+  "play_close": "41511f2ade7c4f5c",
   "quick": "4a2a3d3b55a5874d",
   "quick_close": "6522790935fe45a2",
   "info": "92eee635cad277b2",
-  "info_lv": "70f2ea8275a8f81d",
-  "half_shutter": "70f2ea8275a8f81d"
+  "info_lv": "11073ce5097e63fc",
+  "half_shutter": "11073ce5097e63fc"
  }
 }

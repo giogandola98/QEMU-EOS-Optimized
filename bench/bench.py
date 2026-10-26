@@ -250,6 +250,8 @@ def main():
     ap.add_argument("--count", action="append", default=[], help="count lines of qemu.log containing this text")
     ap.add_argument("--min-count", action="append", default=[],
                     help="TEXT=N: error unless qemu.log has at least N lines containing TEXT")
+    ap.add_argument("--max-count", action="append", default=[],
+                    help="TEXT=N: error if qemu.log or the UART log has more than N lines containing TEXT")
     ap.add_argument("--step", action="append", default=[],
                     help="after the idle window, in order: key:K (sendkey K), wait:S, shot:NAME (frame hash + "
                          "PNG), mon:CMD (monitor command, output kept), until:TEXT[=N] (wait until qemu.log has "
@@ -463,6 +465,17 @@ def main():
         res.setdefault("min_counts", {})[txt] = got
         if got < int(n):
             res["errors"].append("log: %d lines with %r, expected >= %s" % (got, txt, n))
+    for spec in a.max_count:
+        txt, n = spec.rsplit("=", 1)
+        try:
+            with open(os.path.join(out, "uart.log"), "rb") as f:
+                uart_lines = f.read().decode(errors="replace").splitlines()
+        except OSError:
+            uart_lines = []
+        got = sum(1 for l in text.splitlines() + uart_lines if txt in l)
+        res.setdefault("max_counts", {})[txt] = got
+        if got > int(n):
+            res["errors"].append("log: %d lines with %r, expected <= %s" % (got, txt, n))
     res["qemu_errors"] = [l for l in text.splitlines() if "Assertion" in l or "qemu-system-arm:" in l][-5:]
 
     # Frames this run tries to capture: the GUI, the scenarios (unless skipped) and the step shots
