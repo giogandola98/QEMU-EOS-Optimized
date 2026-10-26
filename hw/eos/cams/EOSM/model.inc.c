@@ -7,7 +7,9 @@
  */
         .name                   = MODEL_NAME_EOSM,
         .init_hook              = eos_init_eosm,    /* LiveView frame injection (lv.c) */
-        .quirks                 = EOS_QUIRK_I2C_TX_READY,   /* audio IC init (InitializeAudioIC) */
+        .eeko                   = &eeko_eosm,       /* Eeko mailbox answers (eeko.c) */
+        .quirks                 = EOS_QUIRK_I2C_TX_READY    /* audio IC init (InitializeAudioIC) */
+                                | EOS_QUIRK_RAM_GAP_READ0,  /* display log past its state names */
         .digic_version          = 5,
         .ram_size               = 0x10000000,   /* 256MB */
         .current_task_addr      = 0x3DE78,

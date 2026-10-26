@@ -65,6 +65,7 @@ typedef bool (*eos_pm_handler_fn)(unsigned int address, unsigned char type, unsi
                                   unsigned int *ret);
 
 struct capture_profile;              /* still-photo capture data, hw/eos/capture.h */
+struct eeko_profile;                 /* Eeko core mailbox model, hw/eos/eeko.h */
 
 /*
  * Hardware differences that used to be checked by model name in the shared code. Set in .quirks of
@@ -108,6 +109,10 @@ enum eos_quirk {
                                              * Canon's system check program (1300D, 4000D) */
     EOS_QUIRK_I2C_TX_READY      = 1 << 19,  /* I2C 0xC0090000: "TX data ready" (status bit 4) is set
                                              * when a transmit starts, before the first byte (EOSM) */
+    EOS_QUIRK_RAM_GAP_READ0     = 1 << 20,  /* reads between the end of RAM and the uncached alias, and
+                                             * from there to 0x80000000, return 0 instead of stopping
+                                             * the emulator (EOSM: Canon's display log reads a string
+                                             * pointer past its 4-entry table) */
 };
 
 struct eos_model_desc {
@@ -117,6 +122,8 @@ struct eos_model_desc {
      * 0 / NULL = the generic upstream behaviour. docs/models/PROFILES.md */
     eos_pm_handler_fn pm_handler;   /* power management (hw/eos/cams/<CAM>/pm.c) */
     const struct capture_profile *capture;  /* shutter release emulation (hw/eos/cams/<CAM>/capture.c) */
+    const struct eeko_profile *eeko;    /* Eeko core answers on the 0xD02C2000 mailbox (hw/eos/eeko.c,
+                                         * hw/eos/cams/<CAM>/eeko.c); NULL = the block only logs */
     void (*init_hook)(void);        /* end of eos_init_common, before the start address: ROM patches,
                                      * boot flags, extra images */
     const char *mpu_spells;         /* MPU init spells (mpu_spells/<name>.h), NULL = the model's own */

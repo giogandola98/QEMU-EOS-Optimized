@@ -30,6 +30,7 @@
 #include "hw/eos/engine.h"
 #include "hw/eos/pm.h"
 #include "hw/eos/capture.h"
+#include "hw/eos/eeko.h"
 
 #define IGNORE_CONNECT_POLL
 
@@ -720,6 +721,27 @@ static void eos_io_write(void *opaque, hwaddr addr, uint64_t val, uint32_t size)
 
     eos_handler(addr, type, val);
 }
+
+/* EOS_QUIRK_RAM_GAP_READ0: reads 0, writes are dropped; the first access is reported */
+static uint64_t ram_gap_read(void *opaque, hwaddr addr, unsigned size)
+{
+    static int reported;
+    if (!reported++)
+    {
+        fprintf(stderr, "[EOS] read from unpopulated RAM space (offset 0x%" HWADDR_PRIx " in the gap) reads 0\n", addr);
+    }
+    return 0;
+}
+
+static void ram_gap_write(void *opaque, hwaddr addr, uint64_t value, unsigned size)
+{
+}
+
+static const MemoryRegionOps ram_gap_ops = {
+    .read = ram_gap_read,
+    .write = ram_gap_write,
+    .endianness = DEVICE_NATIVE_ENDIAN,
+};
 
 static const MemoryRegionOps mmio_ops = {
     .read = eos_io_read,
@@ -1918,6 +1940,27 @@ static void *eos_init_cpu(void)
                                    eos_state->model->ram_extra_size[i], &error_abort);
             memory_region_add_subregion(eos_state->system_mem, eos_state->model->ram_extra_addr[i],
                                         &eos_state->ram_extra[i]);
+        }
+    }
+
+    if (EOS_QUIRK(RAM_GAP_READ0))
+    {
+        /* Unpopulated address space after the RAM and after its uncached alias. Without a region
+         * there, a guest read stops the emulator (memory_region_dispatch_read: decode error); the
+         * camera reads something and goes on. Lowest priority: any other region mapped there wins. */
+        const hwaddr gaps[2][2] = {
+            { RAM_SIZE, CACHING_BIT },
+            { CACHING_BIT + RAM_SIZE, 0x80000000 },
+        };
+        for (int i = 0; i < 2; i++)
+        {
+            if (gaps[i][1] > gaps[i][0])
+            {
+                memory_region_init_io(&eos_state->ram_gap[i], NULL, &ram_gap_ops, NULL, "eos.ram_gap",
+                                      gaps[i][1] - gaps[i][0]);
+                memory_region_add_subregion_overlap(eos_state->system_mem, gaps[i][0],
+                                                    &eos_state->ram_gap[i], -1);
+            }
         }
     }
 
@@ -3544,6 +3587,12 @@ unsigned int eos_handle_gpio(unsigned int parm, unsigned int address, unsigned c
 
     /* shutter release lines (capture.c), model-specific */
     if (capture_handle_gpio(address, type, value, &ret))
+    {
+        return ret;
+    }
+
+    /* Eeko clock/reset 0xC022320C, 0xC0223210 (eeko.c), on models with an Eeko profile */
+    if (eeko_handle_gpio(address, type, value, &ret))
     {
         return ret;
     }
@@ -6696,42 +6745,7 @@ unsigned int eos_handle_flashctrl(unsigned int parm, unsigned int address, unsig
 
 unsigned int eos_handle_eeko_comm(unsigned int parm, unsigned int address, unsigned char type, unsigned int value)
 {
-    const char *msg = "INT%Xh: ???";
-    int msg_arg1 = 0;
-    unsigned int ret = 0;
-
-    /* these interrupts are in pairs, e.g. 0x101, 0x102, 0x109, 0x10A ... */
-    /* even indices / odd interrupts (reg offset 0x00, 0x40 ...) are from eeko to icu */
-    /* odd indices / even interrupts (reg offset 0x20, 0x60 ...) are from icu to eeko */
-    const int interrupt_map[] = {
-        0x101, 0x109, 0x111, 0x119, 0x121, 0x129, 0x131, 0x139,
-        0x0FF, 0x107, 0x10F, 0x117, 0x11F, 0x127, 0x12F, 0x137,
-        0x123,
-    };
-    
-    int interrupt_index = (address >> 5) & 0x3F;
-    assert(interrupt_index/2 < COUNT(interrupt_map));
-    int interrupt_id = interrupt_map[interrupt_index/2] + interrupt_index % 2;
-    msg_arg1 = interrupt_id;
-    
-    switch (address & 0x1F)
-    {
-        case 0x04:
-            msg = "INT%Xh: interrupt acknowledged";
-            break;
-        case 0x08:
-            msg = "INT%Xh: setup interrupts? (1)";
-            break;
-        case 0x10:
-            msg = "INT%Xh: trigger interrupt?";
-            break;
-        case 0x18:
-            msg = "INT%Xh: setup interrupts? (B)";
-            break;
-    }
-
-    io_log("EEKO", address, type, value, ret, msg, msg_arg1, 0);
-    return ret;
+    return eeko_handle_comm(address, type, value);
 }
 
 unsigned int eos_handle_memdiv(unsigned int parm, unsigned int address, unsigned char type, unsigned int value)

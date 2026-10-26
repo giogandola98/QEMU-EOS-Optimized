@@ -3,7 +3,7 @@ obj-y += ../eos/eos.o ../eos/model_list.o ../eos/engine.o ../eos/capture.o
 obj-y += ../eos/eos_ml_helpers.o ../eos/mpu.o ../eos/serial_flash.o
 obj-y += ../eos/dbi/logging.o ../eos/dbi/memcheck.o ../eos/dbi/debugmsg.o
 obj-y += ../eos/dbi/backtrace.o
-obj-y += ../eos/scnprintf.o ../eos/lv_inject.o
+obj-y += ../eos/scnprintf.o ../eos/lv_inject.o ../eos/eeko.o
 
 # Camera profiles (docs/models/PROFILES.md): every .c in hw/eos/cams/<CAM>/ is built, except the
 # model table entry model.inc.c (included by model_list.c), so a new profile needs no edit here.

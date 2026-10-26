@@ -319,6 +319,7 @@ typedef struct EOSState
     MemoryRegion ram_uncached;
     MemoryRegion ram_uncached0;
     MemoryRegion ram_extra[ram_extra_array_len];
+    MemoryRegion ram_gap[2];        /* EOS_QUIRK_RAM_GAP_READ0 */
     MemoryRegion rom0;
     MemoryRegion rom1;
     MemoryRegion mmio;
