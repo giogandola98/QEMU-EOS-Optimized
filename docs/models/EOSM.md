@@ -130,8 +130,8 @@ about 130 MiB.
 
 ## MPU spells from the real camera
 
-Penumbra's capture kit logged every MPU message of a boot of the owner's camera (private,
-`canon-firmware-dumps/EOSM/capture/`). `test/mpu_compare.py LOG` compares such a log with the table the way
+Penumbra's capture kit logged every MPU message of a boot of the owner's camera (kept privately with the
+ROMs). `test/mpu_compare.py LOG` compares such a log with the table the way
 `mpu.c` matches spells and lists, per message class/id, the sends the table does not answer and the replies
 whose bytes differ. Applied to `mpu_spells/EOSM.h`:
 
@@ -173,7 +173,7 @@ capture kit's buffer dump), not on screen. Showing them needs Canon's LiveView d
 
 ## Open questions and useful captures from the real camera
 
-What the first capture-kit run showed and what a second one should collect is in the private analysis
-(`canon-firmware-re/EOSM-202/notes/EOSM-capture-analysis.md`). In short: the display-off / power-save scenario
+What the first capture-kit run showed and what a second one should collect is in a private analysis. In
+short: the display-off / power-save scenario
 (how PowerMgr enters selfRefresh, the basis for a `pm.c`), a boot log reaching the first half-press, one still
 capture (MPU release events, Eeko around development) and RAM dumps in LiveView and display-off.
