@@ -52,7 +52,8 @@ ROMs are not available. Camera profile: `hw/eos/cams/EOSM/` (`docs/models/PROFIL
    `[AUDIO] ERROR I2C abort`) and the start-up task retried for ever with a grey screen. The quirk sets bit 4
    when a transmit starts (config bits 0x20 and 0x200). Only the EOS M sets it.
 
-Nothing else was needed: display, SD card, RTC, MPU spells and button codes from the upstream entry work.
+Nothing else was needed to boot: display, SD card, RTC, MPU spells and button codes from the upstream entry
+work. The MPU replies were later replaced with the real camera's (below).
 
 ## What works / what does not
 
@@ -77,9 +78,7 @@ Not working / not checked:
 - Overlay bars in LiveView with INFO are drawn magenta: palette entries with partial opacity are shown
   opaque. Cosmetic, same as other DIGIC 5 models upstream.
 - Full shutter, capture and pictures on the card: not looked at (see "Capture" below).
-- MPU spells that the table does not answer (logged as `unknown`, nothing visible breaks): `PROP_LV_LENS`,
-  `PROP_LV_AF_RESULT`, `PROP_Q_POSITION`, `PROP_TFT_STATUS 0`, `PROP_BATTERY_REPORT`, `COM_FA_CHECK_FROM`,
-  `PROP 80020012`, `09 24`/`09 25`/`0e 00` groups.
+- MPU: see "MPU spells from the real camera" below for what is still not answered.
 - `[SD] ERROR SDINTREP=0x00000000` once (card mounts anyway, as on the 4000D), `[TCH]ERROR TouchPanelIC Ack
   Error` (touch panel not emulated), `[PRP] NOT FOUND PROPERTY ID = 0x02050038` (one property absent from the
   rebuilt packages).
@@ -129,11 +128,51 @@ Boot to `startupInitializeComplete`: 2.3-6 s wall (about 25 M guest instructions
 property packages byte by byte over SPI takes about 1 s guest time). Scenarios 0.1-0.7 s each. Peak RSS
 about 130 MiB.
 
+## MPU spells from the real camera
+
+Penumbra's capture kit logged every MPU message of a boot of the owner's camera (private,
+`canon-firmware-dumps/EOSM/capture/`). `test/mpu_compare.py LOG` compares such a log with the table the way
+`mpu.c` matches spells and lists, per message class/id, the sends the table does not answer and the replies
+whose bytes differ. Applied to `mpu_spells/EOSM.h`:
+
+- Same structure as the upstream table (Init, the five group replies, the Complete WaitID chain, lens, card,
+  PERMIT_ICU_EVENT, LiveView start), but the reply payloads were another camera's: they now carry this
+  camera's state (shooting mode, ISO, lens **EF-M15-45mm f/3.5-6.3 IS STM** with its ID and data, AF
+  micro-adjustment, aspect ratio, battery level, board temperature, ...), marked `real EOS M`.
+- Added (the generated table had them commented out): `COM_FA_CHECK_FROM` with the 12-property burst the
+  camera answers, `PROP 80020012` (answer: `PROP_LV_BV`), class `0e 00` (answer `0e 02`), and reply-less
+  entries for what the MPU never answers (`PROP_BATTERY_REPORT`, `PROP_TFT_STATUS 0`, `PROP_LV_AF_RESULT`,
+  `09 24`, `PROP_LV_APERTURE`, `PROP_LV_BV`, the per-frame `03 3b` / `09 17` notifications, Complete WaitID
+  0x80040004).
+- `PROP_LV_LENS` is answered on the camera with the 0x41-byte LV lens block, but that block starts AeWb's
+  LiveView main process, whose white balance runs on the **Eeko** core (`EekoApp/Color/WB/LV/LvWbAlgorWrap.c`):
+  with no Eeko model the wait times out, Canon asserts (line 611, `!IS_ERROR(semErr)`) and the GUI stops. The
+  spell has no reply until Eeko is modelled; the real reply is kept in a comment.
+- Still unanswered (rare, nothing visible breaks): `PROP_BURST_COUNT 02`, `PROP_AVAIL_SHOT` with the real
+  count, `PROP_VIDEO_MODE`, and in LiveView with AF `PROP 8005002A` with non-zero values.
+
+In the emulator Canon wakes Eeko at LiveView start (`Gmt: Wakeup Eeko`, `[ENAV] WakeUpEekoAsyc:Start(1, 0)`).
+The camera's boot log (first 6.6 s) does not show that call, but its Eeko clock/reset register `0xC022320C`
+read 7 (running) in every captured state: LiveView, menu, playback. The upstream `C022320C = 7` -> interrupt
+0x111 shortcut answers the start handshake; Eeko jobs (LiveView white balance, still development) get no
+answer.
+
+## LiveView frames
+
+`hw/eos/lv_inject.c` (option A of `docs/PLAN.md`, "LiveView simulation") writes raw YUV 4:2:2 frames into
+the LiveView buffers at a fixed virtual-time rate; `cams/EOSM/lv.c` starts it from the profile's init hook.
+EOS M buffers, as the camera reports them in LiveView: display image 720x480 (pitch 1440) at `0x4F1D7800`,
+`0x4F5E7800`, `0x4F9F7800` (plus wherever the display's YUV VRAM register points), recording-size (HD) image
+960x639 (pitch 1920) at `0x46000080`, `0x463CC080`. The frames are the camera's own (capture kit
+`LV0.422` / `HD0.422`, lens cap on, so nearly black), stored with the ROMs as `LV.422` / `HD.422` and fetched
+by `ci/fetch_roms.sh`; they are never in this repository. Without the files nothing changes;
+`QEMU_EOS_LV_INJECT=0` turns it off. Canon's own pipeline still does not run (no VD/EDMAC frame events), so
+Canon keeps the display muted at boot; the frames are visible once another screen has turned the display on,
+and ML code that reads the buffers sees real data.
+
 ## Open questions and useful captures from the real camera
 
-- **`sf_dump`** of this camera (Penumbra has the module in `modules/dev_tools/sf_dump`, with the EOS M 2.0.2
-  addresses): a real `SFDATA.BIN` would replace the rebuilt one, add whatever else lives in the flash, and
-  confirm the raw layout (nibble offset, 0x7F0-per-0x800 DMA blocks) assumed here.
-- **MPU spell log at boot** (`mpu_send`/`mpu_recv` to a file): answers for the `unknown` spells above.
-- **LiveView buffers** already captured (`PH-LV/LCD/LV-000.422`, 720x480 UYVY; `HD-000.422`): the frame
-  source for the LiveView injection.
+What the first capture-kit run showed and what a second one should collect is in the private analysis
+(`canon-firmware-re/EOSM-202/notes/EOSM-capture-analysis.md`). In short: the display-off / power-save scenario
+(how PowerMgr enters selfRefresh, the basis for a `pm.c`), a boot log reaching the first half-press, one still
+capture (MPU release events, Eeko around development) and RAM dumps in LiveView and display-off.

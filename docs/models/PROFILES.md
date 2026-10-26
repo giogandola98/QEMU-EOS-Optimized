@@ -10,7 +10,7 @@ the same fields, see "Upstream models" below):
 |---|---|---|---|---|---|
 | `1100D` | 1.0.5 | shooting screen, menus | `pm.c` (deep sleep), `capture.c` | boot, MENU, display off/selfRefresh/wake, shutter + card | validation camera |
 | `4000D` | 1.1.0 | shooting screen, menus | `pm.c` (deep sleep), `capture.c` | boot, MENU, display off/selfRefresh/wake, shutter + card | [`4000D.md`](4000D.md) |
-| `EOSM` | 2.0.2 | MENU, PLAY, Q, INFO screens and LiveView overlays (no LiveView image) | none (quirk `I2C_TX_READY`) | boot, MENU, PLAY, Q, INFO, half-shutter | needs `SFDATA.BIN`; [`EOSM.md`](EOSM.md) |
+| `EOSM` | 2.0.2 | MENU, PLAY, Q, INFO screens and LiveView overlays (LiveView buffers filled with the camera's frames, no Canon pipeline) | `lv.c` (LiveView frame injection, init hook), quirk `I2C_TX_READY` | boot, MENU, PLAY, Q, INFO, half-shutter | needs `SFDATA.BIN`; [`EOSM.md`](EOSM.md) |
 
 ## Layout
 
@@ -22,6 +22,7 @@ the same fields, see "Upstream models" below):
 | `capture.c` | no | Still-photo capture data (`.capture`, `struct capture_profile`, `hw/eos/capture.h`, `docs/models/capture.md`) |
 | any other `*.c` | no | Built automatically: `hw/eos/Makefile.objs` compiles every `cams/*/*.c` except `*.inc.c` |
 | `test/bench.json` | for CI | Test data for `bench/bench.py`: see "Test data" |
+| `lv.c` | no | LiveView buffers for frame injection (`hw/eos/lv_inject.h`), started from `.init_hook` (EOSM) |
 | `test/smoke.sh` | for CI | Smoke-test settings for `ci/smoke.sh`: see "Test data" |
 
 `test/` is not part of the QEMU build: it is excluded from the image hash (`ci/build-image.sh`) and from the build
