@@ -4,4 +4,4 @@
 FW=105; OUT=emu-out/smoke
 # Then a full shutter press (left Ctrl, hw/eos/capture.c): Canon's capture must finish and a picture with
 # EXIF must be on the card (bench/card.py reads it after QEMU exits).
-EXTRA='--debugmsg --min-count "pmSelfRefresh : In=1" --min-count "pmSelfRefresh : Out=1" --step key:i --step wait:3 --step shot:display_off --step wait:15 --step key:i --step wait:4 --step shot:woken --step key:ctrl --step "until:write done" --step wait:2 --card --min-pictures 1 --min-count "[CAPTURE] shot=1" --min-count "scsCapReady=1" --min-count "write done=1"'
+EXTRA='--debugmsg --min-count "pmSelfRefresh : In=1" --min-count "pmSelfRefresh : Out=1" --step key:i --step "until:[PM1100D] self-refresh #1 in" --step shot:display_off --step wait:12 --step key:i --step "until:[PM1100D] self-refresh #1 out" --step wait:4 --step shot:woken --step key:ctrl --step "until:write done" --step wait:2 --card --min-pictures 1 --min-count "[CAPTURE] shot=1" --min-count "scsCapReady=1" --min-count "write done=1"'

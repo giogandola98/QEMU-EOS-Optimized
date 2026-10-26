@@ -1008,7 +1008,15 @@ static void eos_interrupt_timer_body(void)
          * arrive and wake the CPU. Always 0 on the other models. */
         const bool gated = eos_clocks_gated;
 
-        if (!gated)
+        /* The clocks also advance by guest progress, not by host time alone: without -icount the
+         * virtual clock follows the host clock, and a guest that the host does not schedule would
+         * see timers expire in the middle of a few instructions (a 2 s HPTimer firing between
+         * Canon's "pmSelfRefresh : In" and its IRQ mask woke the 4000D's first deep sleep at once).
+         * A step in which the vCPU thread got no CPU time stands still, like a gated one. */
+        const bool progressed = eos_guest_progressed();
+        const bool stalled = gated || !progressed;
+
+        if (!stalled)
         {
             eos_state->digic_timer20 += DIGIC_TIMER_STEP;
             eos_state->digic_timer20 &= DIGIC_TIMER20_MASK;
@@ -1018,7 +1026,7 @@ static void eos_interrupt_timer_body(void)
 
         for (pos = 0; pos < COUNT(eos_state->timer_enabled); pos++)
         {
-            if (eos_state->timer_enabled[pos] && !gated)
+            if (eos_state->timer_enabled[pos] && !stalled)
             {
                 eos_state->timer_current_value[pos] += DIGIC_TIMER_STEP;
 
@@ -1031,15 +1039,10 @@ static void eos_interrupt_timer_body(void)
 
         // interrupts that wait for the guest to have run (eos_trigger_int_after_progress)
         {
-            int progressed = -1;
             for (pos = 1; pos < INT_ENTRIES; pos++)
             {
                 if (eos_state->irq_after_progress[pos])
                 {
-                    if (progressed < 0)
-                    {
-                        progressed = eos_guest_progressed();
-                    }
                     if (progressed && !--eos_state->irq_after_progress[pos])
                     {
                         eos_trigger_int(pos, 0);
@@ -1050,7 +1053,7 @@ static void eos_interrupt_timer_body(void)
 
         for(pos = INT_ENTRIES-1; pos > 0; pos--)
         {
-            if (gated && pos == TIMER_INTERRUPT)
+            if (stalled && pos == TIMER_INTERRUPT)
             {
                 continue;   /* tick frozen, resumes where it was */
             }
@@ -1100,7 +1103,7 @@ static void eos_interrupt_timer_body(void)
             0x0E, 0x1E, 0x2E, 0x3E, 0x4E, 0x5E, 0x6E, 0x7E,
         };
 
-        for (int id = 0; id < COUNT(eos_state->UTimers) && !gated; id++)
+        for (int id = 0; id < COUNT(eos_state->UTimers) && !stalled; id++)
         {
             if (eos_state->UTimers[id].active
                 && eos_state->UTimers[id].output_compare
@@ -1123,7 +1126,7 @@ static void eos_interrupt_timer_body(void)
             HPTIMER_INTERRUPT, HPTIMER_INTERRUPT, HPTIMER_INTERRUPT, HPTIMER_INTERRUPT,
         };
         
-        for (pos = 0; pos < COUNT(eos_state->HPTimers) && !gated; pos++)
+        for (pos = 0; pos < COUNT(eos_state->HPTimers) && !stalled; pos++)
         {
             if (eos_state->HPTimers[pos].active
                 && eos_state->HPTimers[pos].output_compare
