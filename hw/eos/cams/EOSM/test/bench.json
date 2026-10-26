@@ -8,9 +8,8 @@
                ["quick", ["q"]], ["quick_close", ["q"]], ["info", ["i"]], ["info_lv", ["i"]]],
  "uart_markers": ["K331 READY", "[STARTUP] startupInitializeComplete", "[MC] guimode comp. 0"],
  "log_markers": ["GUI_Initialize", "DlgLiveView.c LOCAL_DIALOG_REFRESH_LV"],
- "_expected": "frame name -> pixel hash (bench.py --expect). LiveView frames (gui, menu_close, play_close, info_lv, half_shutter) show Canon's overlays over the muted grey display: Canon turns the LCD on with mute once LiveView white balance has started on Eeko (hw/eos/eeko.c) and keeps it muted because no sensor frame reaches its pipeline",
+ "_expected": "frame name -> pixel hash (bench.py --expect). No gui hash: the boot screen is LiveView, and whether its first settled frame has the info bars depends on timing. LiveView frames (menu_close, play_close, info_lv, half_shutter) show Canon's overlays over the muted grey display: Canon turns the LCD on with mute once LiveView white balance has started on Eeko (hw/eos/eeko.c) and keeps it muted because no sensor frame reaches its pipeline",
  "expected": {
-  "gui": "db0bcda2b8e3bd47",
   "menu": "0e542103a4bcf2f9",
   "menu_right": "13227f3fcde2e892",
   "menu_close": "41511f2ade7c4f5c",
