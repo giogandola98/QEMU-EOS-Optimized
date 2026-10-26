@@ -24,7 +24,20 @@ tools_hash=$( { echo "$base"; git rev-parse HEAD; sha256sum ci/qemu/Containerfil
               | sha256sum | cut -c1-12)
 image=qemu-eos-ci:$PROFILE-$tools_hash
 
+# The runner keeps every image it built and its disk fills up (a build then fails with "no space left on
+# device" while podman commits a layer). Before building a new QEMU layer, drop this repository's older
+# images, keeping the newest KEEP_IMAGES of each name; podman refuses to remove an image a container uses.
+prune_old_images() {
+    local name
+    for name in qemu-eos-base qemu-eos-ci; do
+        podman images --filter "reference=$name" --format '{{.CreatedAt}}	{{.Repository}}:{{.Tag}}' \
+            | sort -r | tail -n +$(( ${KEEP_IMAGES:-3} + 1 )) | cut -f2 \
+            | while read -r old; do podman rmi "$old" >/dev/null 2>&1 && echo "removed $old" >&2 || true; done
+    done
+}
+
 if ! podman image exists "$base"; then
+    prune_old_images
     start=$(date +%s)
     podman build --network=host --build-arg "QEMU_PROFILE=$PROFILE" -t "$base" -f ci/qemu/Containerfile . 2>&1 \
         | tail -n 80 >&2 || { echo "QEMU build ($PROFILE) failed" >&2; exit 1; }
