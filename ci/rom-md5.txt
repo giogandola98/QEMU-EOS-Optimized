@@ -6,7 +6,12 @@
 4000D-110 ROM0.BIN 387d96a501c80ee5a1291e6a4bbbb636
 4000D-110 ROM1.BIN 58ff143b77ea4d7d9d19cfef21f17bff
 # EOSM: ROM0 is unpopulated (bus pattern; not loaded by the model), ROM1 is the firmware. SFDATA (serial
-# flash) is rebuilt from a RAM dump of the same camera (hw/eos/cams/EOSM/test/sfdata_from_ram.py).
+# flash) is the camera's own, read with Canon's READ routine by the Penumbra capture kit (2026-10); it
+# replaced the copy rebuilt from a RAM dump (hw/eos/cams/EOSM/test/sfdata_from_ram.py, md5 a9523d5b...,
+# still in the package as SFDATA-rebuilt.BIN). LV.422 / HD.422: LiveView buffers of the same camera
+# (capture kit LV0.422 / HD0.422), injected by hw/eos/cams/EOSM/lv.c.
 EOSM-202 ROM0.BIN b5b2610f4add8cfdad7cf381475b7149
 EOSM-202 ROM1.BIN ac3ca19d9aea2bd5bda2a39817c46588
-EOSM-202 SFDATA.BIN a9523d5ba88d3454ac932aeb64de5367
+EOSM-202 SFDATA.BIN 451d492d17354b44b73302a789b4f7ac
+EOSM-202 LV.422 029de33826aa2895a707f8bae4673760
+EOSM-202 HD.422 334aab0e3959ab0fe834a138af9bce67

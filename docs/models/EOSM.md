@@ -22,10 +22,13 @@ ROMs are not available. Camera profile: `hw/eos/cams/EOSM/` (`docs/models/PROFIL
    now starts with an erased flash and says so (`hw/eos/serial_flash.c`), which reproduces exactly that
    assert.
 
-   No sf_dump of this camera exists, but a 256 MiB RAM dump (`ML/LOGS/RAM4.BIN`) does, and Canon keeps both
-   packages in RAM after loading them. `hw/eos/cams/EOSM/test/sfdata_from_ram.py` writes them back into a
-   flash image; the result (`a9523d5b...`) is stored with the ROMs in the private package `canon-rom/EOSM-202`
-   and listed in `ci/rom-md5.txt`. How the firmware reads the flash, as found in the ROM:
+   The package `canon-rom/EOSM-202` now holds the camera's own flash (`451d492d...`, `ci/rom-md5.txt`), read
+   with Canon's READ routine by Penumbra's capture kit. Before that, a 256 MiB RAM dump was the only source:
+   Canon keeps both packages in RAM after loading them, and `hw/eos/cams/EOSM/test/sfdata_from_ram.py` writes
+   them back into a flash image (`a9523d5b...`, kept in the package as `SFDATA-rebuilt.BIN`). The real dump
+   confirms that layout: the two images differ only in the padding nibbles at each 0x800 boundary, in a
+   4-byte header at flash offset 0 (the model ID, 0x80000331) and in the settings Canon wrote since the RAM
+   dump (last FIX sectors). How the firmware reads the flash, as found in the ROM:
 
    | What | Where | Behaviour |
    |---|---|---|
