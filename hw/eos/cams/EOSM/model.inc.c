@@ -1,10 +1,12 @@
 /*
  * Canon EOS M, fw 2.0.2, model ID 0x331: entry of eos_model_list[]. Included by model_list.c inside
  * the table, in the DIGIC 5 group: zero fields take the DIGIC 5 defaults. Own MPU spells and button
- * codes; needs SFDATA.BIN (serial flash with the property packages, test/sfdata_from_ram.py).
+ * codes; needs SFDATA.BIN (serial flash with the property packages); LV.422 / HD.422 (optional) are
+ * injected into the LiveView buffers (lv.c).
  * Profile layout: docs/models/PROFILES.md; what was fixed and why: docs/models/EOSM.md.
  */
         .name                   = MODEL_NAME_EOSM,
+        .init_hook              = eos_init_eosm,    /* LiveView frame injection (lv.c) */
         .quirks                 = EOS_QUIRK_I2C_TX_READY,   /* audio IC init (InitializeAudioIC) */
         .digic_version          = 5,
         .ram_size               = 0x10000000,   /* 256MB */

@@ -4,6 +4,7 @@
 #
 # Usage: ci/fetch_roms.sh CAM-FW DEST          e.g. ci/fetch_roms.sh 1100D-105 /dev/shm/roms.X
 # Package: $GITHUB_SERVER_URL/api/packages/$ROM_PKG_OWNER/generic/canon-rom/<CAM>-<FW>/{ROM0.BIN,ROM1.BIN,SFDATA.BIN}
+#          plus optional LiveView frames {LV.422,HD.422} (hw/eos/lv_inject.h)
 #          (ROM_PKG_OWNER: CI variable naming a PRIVATE org; unset => exit 3, not available)
 # Auth:    $ROM_TOKEN (repo secret: a personal access token with only read:package).
 # Exit:    0 fetched and verified (sha256 from the server, MD5 from ci/rom-md5.txt), 3 not available, 1 error.
@@ -47,7 +48,7 @@ fi
 mapfile -t files < <(python3 -I -c '
 import json, sys
 for f in json.load(open(sys.argv[1])):
-    if f["name"] in ("ROM0.BIN", "ROM1.BIN", "SFDATA.BIN"):
+    if f["name"] in ("ROM0.BIN", "ROM1.BIN", "SFDATA.BIN", "LV.422", "HD.422"):
         print(f["name"] + "\t" + f["sha256"])
 ' "$list")
 [ "${#files[@]}" -gt 0 ] || { echo "ROMs for $VERSION: unavailable (package has no ROM files)"; exit 3; }
