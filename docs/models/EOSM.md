@@ -63,7 +63,7 @@ work. The MPU replies were later replaced with the real camera's (below).
 | MENU: opens on the last tab used (setup 4, "Vers. firmware: 2.0.2", Italian UI), right arrow -> My Menu, SET enters it, MENU back/close | `menu`, `menu_right`, `menu_close` |
 | PLAY ("Nessuna immagine": the test card has no pictures) and back | `play`, `play_close` |
 | Q (quick control: AF method, drive, quality, WB, ...) and back | `quick`, `quick_close` |
-| INFO: shooting-settings screen (Av, F4.0, ISO 800, RAW, 16 shots), then LiveView with the info bars | `info`, `info_lv` |
+| INFO: shooting-settings screen with the camera's own settings from its MPU replies (Tv 1/125, ISO 100, RAW+L, 3:2), then LiveView with the info bars (390 shots, as the camera reports) | `info`, `info_lv` |
 | Half-shutter: `IDLEHandler PRESS_SW1_BUTTON` / `UNPRESS_SW1_BUTTON`, metering timer | smoke test `--min-count` |
 | SD card mounted, file numbering from the camera's settings (100_6561) | log |
 | `-d debugmsg` with DryosDebugMsg `0x40D4` (RAM copy, as in ML's stubs) | `bench.py --cam EOSM --debugmsg` |
@@ -167,8 +167,9 @@ EOS M buffers, as the camera reports them in LiveView: display image 720x480 (pi
 `LV0.422` / `HD0.422`, lens cap on, so nearly black), stored with the ROMs as `LV.422` / `HD.422` and fetched
 by `ci/fetch_roms.sh`; they are never in this repository. Without the files nothing changes;
 `QEMU_EOS_LV_INJECT=0` turns it off. Canon's own pipeline still does not run (no VD/EDMAC frame events), so
-Canon keeps the display muted at boot; the frames are visible once another screen has turned the display on,
-and ML code that reads the buffers sees real data.
+in LiveView Canon keeps the image layer off (`SetImageVramAddress pImage_Address=0`): the screen still shows
+the overlays over grey, and the frames are there for code that reads the buffers (ML's overlays, the
+capture kit's buffer dump), not on screen. Showing them needs Canon's LiveView display path to run.
 
 ## Open questions and useful captures from the real camera
 
