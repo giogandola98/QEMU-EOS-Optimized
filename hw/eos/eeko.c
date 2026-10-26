@@ -115,6 +115,55 @@ static uint32_t fifo_pop(int ch)
     return word;
 }
 
+/* ---- shared command memory (PComMem) ---- */
+
+#define EEKO_BOOT_BLOCK     0x01F80000  /* filled by the main CPU before it starts Eeko */
+#define EEKO_BOX_SLOT       0x40        /* reply structures: header + up to 15 words */
+
+static void pcm_region(int eeko_side, uint32_t *base, uint32_t *size)
+{
+    uint32_t w[2];
+    eos_mem_read(EEKO_BOOT_BLOCK + (eeko_side ? 0x30 : 0x28), w, sizeof(w));
+    *base = w[0] & ~CACHING_BIT;
+    *size = w[1];
+}
+
+void eeko_free(uint32_t addr)
+{
+    uint32_t base, size;
+    pcm_region(0, &base, &size);
+    addr &= ~CACHING_BIT;
+    if (addr < base + 4 || addr >= base + size) {
+        return;                 /* not a pool structure (a table, a buffer address, a value) */
+    }
+    uint8_t in_use;
+    eos_mem_read(addr - 4, &in_use, 1);
+    if (in_use) {
+        in_use = 0;
+        eos_mem_write(addr - 4, &in_use, 1);
+    }
+}
+
+uint32_t eeko_box(const uint32_t *words, int count)
+{
+    uint32_t base, size;
+    pcm_region(1, &base, &size);
+    assert(count <= EEKO_BOX_SLOT / 4 - 1);
+    for (uint32_t slot = base; size && slot + EEKO_BOX_SLOT <= base + size; slot += EEKO_BOX_SLOT) {
+        uint8_t hdr[4];
+        eos_mem_read(slot, hdr, 4);
+        if (!hdr[0]) {
+            hdr[0] = 1;
+            hdr[3] = 1;
+            eos_mem_write(slot, hdr, 4);
+            eos_mem_write(slot + 4, (void *)words, count * 4);
+            return slot + 4;
+        }
+    }
+    fprintf(stderr, "[EEKO] no free reply structure in Eeko's PComMem (0x%X, 0x%X bytes)\n", base, size);
+    return 0;
+}
+
 static void eeko_send_to_main(const struct eeko_msg *m)
 {
     fifo_push(m->ch, (uint32_t)m->cmd << 24 | (m->param & 0xFFFFFF));
@@ -146,6 +195,10 @@ static void eeko_request(int ch, uint32_t word0, uint32_t arg)
         replies[0].ch = (req.cmd == EEKO_SYSTEM) ? EEKO_CH_SYSTEM : EEKO_CH_REPLY;
         replies[0].arg = 0;
         n = 1;
+    }
+    /* Eeko copies a request's structure and frees it (byte 0 of its PComMem header) */
+    if (arg) {
+        eeko_free(arg);
     }
     for (int i = 0; i < n && i < EEKO_MAX_REPLIES; i++) {
         eeko_send_to_main(&replies[i]);

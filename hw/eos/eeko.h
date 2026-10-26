@@ -41,6 +41,14 @@ enum {
     EEKO_CREATIVE = 6, EEKO_RECOGNITION = 7, EEKO_SYSTEM = 8, EEKO_SEQUENCE = 10,
 };
 
+/* Shared command memory (PComMem): request structures come from fixed pools in the main CPU's block
+ * (boot block +0x28/+0x2C), each with a 4-byte header whose byte 0 is "in use"; the receiver frees a
+ * structure by clearing that byte once it has copied it. eeko_free() does that for one the model
+ * consumed (requests' own arg is freed by eeko.c); eeko_box() returns a structure in Eeko's block
+ * (+0x30/+0x34) holding the given words, for replies the main CPU reads and then frees. */
+void eeko_free(uint32_t addr);
+uint32_t eeko_box(const uint32_t *words, int count);
+
 /* MMIO 0xD02C2000..0xD02C243F (all models; without an Eeko profile it only logs, as upstream) */
 unsigned int eeko_handle_comm(unsigned int address, unsigned char type, unsigned int value);
 
