@@ -10,7 +10,7 @@ the same fields, see "Upstream models" below):
 |---|---|---|---|---|---|
 | `1100D` | 1.0.5 | shooting screen, menus | `pm.c` (deep sleep), `capture.c` | boot, MENU, display off/selfRefresh/wake, shutter + card | validation camera |
 | `4000D` | 1.1.0 | shooting screen, menus | `pm.c` (deep sleep), `capture.c` | boot, MENU, display off/selfRefresh/wake, shutter + card | [`4000D.md`](4000D.md) |
-| `EOSM` | 2.0.2 | MENU, PLAY, Q, INFO screens and LiveView overlays (LiveView buffers filled with the camera's frames, no Canon pipeline) | `lv.c` (LiveView frame injection, init hook), quirk `I2C_TX_READY` | boot, MENU, PLAY, Q, INFO, half-shutter | needs `SFDATA.BIN`; [`EOSM.md`](EOSM.md) |
+| `EOSM` | 2.0.2 | MENU, PLAY, Q, INFO screens and LiveView overlays (LiveView buffers filled with the camera's frames, no Canon pipeline) | `lv.c` (LiveView frame injection, init hook), `eeko.c` (Eeko answers), quirks `I2C_TX_READY`, `RAM_GAP_READ0` | boot, MENU, PLAY, Q, INFO, half-shutter, LiveView white balance on Eeko | needs `SFDATA.BIN`; [`EOSM.md`](EOSM.md), [`eeko.md`](eeko.md) |
 
 ## Layout
 
@@ -23,6 +23,7 @@ the same fields, see "Upstream models" below):
 | any other `*.c` | no | Built automatically: `hw/eos/Makefile.objs` compiles every `cams/*/*.c` except `*.inc.c` |
 | `test/bench.json` | for CI | Test data for `bench/bench.py`: see "Test data" |
 | `lv.c` | no | LiveView buffers for frame injection (`hw/eos/lv_inject.h`), started from `.init_hook` (EOSM) |
+| `eeko.c` | no | DIGIC 5 Eeko core: per-message answers on the mailbox (`.eeko`, `struct eeko_profile`, `hw/eos/eeko.h`, [`eeko.md`](eeko.md)) |
 | `test/smoke.sh` | for CI | Smoke-test settings for `ci/smoke.sh`: see "Test data" |
 
 `test/` is not part of the QEMU build: it is excluded from the image hash (`ci/build-image.sh`) and from the build
@@ -41,6 +42,7 @@ A model entry has two kinds of fields (`hw/eos/model_list.h`):
 |---|---|---|
 | `pm_handler` | function | Called for every MMIO access before the regular handlers (PowerMgr idle loop, selfRefresh). `QEMU_EOS_PM_MODEL=0` disables it |
 | `capture` | data | Shutter release emulation (`hw/eos/capture.c`) |
+| `eeko` | data | Eeko core mailbox model (`hw/eos/eeko.c`): requests answered as Eeko's tasks do, `0xC022320C` start/stop handshake. NULL = the 0xD02C2000 block only logs (upstream). `QEMU_EOS_EEKO=0` disables it |
 | `init_hook` | function | Called at the end of `eos_init_common()`, after the MPU and engine init and before the DIGIC 6+ start address: ROM patches, boot flags, extra RAM images |
 | `mpu_spells` | name | MPU init spell set (`hw/eos/mpu_spells/<name>.h`) when the camera has none of its own, e.g. `MODEL_NAME_60D`. NULL = the set named like the model, else the generic set |
 | `button_codes` | name | MPU button code table (`mpu_spells/button_codes.h`), same rule |
@@ -73,6 +75,7 @@ Quirks (`enum eos_quirk`): one flag per hardware difference that is a single bra
 | `GPIO_VSW_6000` | GPIO `0xF480` (VSW status) reads `0x6000` | 5D2, 50D |
 | `GPIO_F48C_HDMI` | GPIO `0xF48C` reads `0x4000000` (HDMI disconnected), skips Canon's system check program | 1300D, 4000D |
 | `I2C_TX_READY` | I2C `0xC0090000`: status bit 4 ("TX data ready") is set when a transmit starts, not only after the first byte | EOSM |
+| `RAM_GAP_READ0` | the unpopulated space after the RAM and after its uncached alias (up to `0x80000000`) reads 0 and ignores writes, instead of stopping the emulator | EOSM |
 
 When a new camera needs a different behaviour: if it is one more value or branch in an existing handler, add a
 field or a quirk (default 0 = old behaviour, document it here); if it is a model of its own (a register block, a

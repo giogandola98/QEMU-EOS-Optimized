@@ -1,7 +1,8 @@
 # Canon EOS M, firmware 2.0.2
 
 Status: **boots Canon firmware to its GUI headless; MENU, PLAY, Q, INFO, arrows, SET and the half-shutter
-work. The LiveView screen shows Canon's overlays on grey (no sensor image).** CI smoke test:
+work. LiveView starts as on the camera, white balance on the Eeko core included (`docs/models/eeko.md`); the
+screen shows Canon's overlays over the muted (grey) image layer (no sensor image).** CI smoke test:
 `ci/smoke.sh IMAGE EOSM` (step "EOSM smoke test" in `.forgejo/workflows/ci.yml`), skipped cleanly when the
 ROMs are not available. Camera profile: `hw/eos/cams/EOSM/` (`docs/models/PROFILES.md`).
 
@@ -9,7 +10,7 @@ ROMs are not available. Camera profile: `hw/eos/cams/EOSM/` (`docs/models/PROFIL
 |---|---|
 | Model ID | 0x331 (`K331 READY` on the UART) |
 | SoC / OS | DIGIC 5, ARM946E-S (the bootloader programs 946 protection regions), DryOS, ICU firmware 2.0.2 (inner 9.9.8) |
-| Base model | upstream qemu-eos `EOSM` entry (own MPU spell table and button codes), unchanged except the quirk below |
+| Base model | upstream qemu-eos `EOSM` entry (own MPU spell table and button codes), plus the quirks below and the Eeko model (`.eeko`, `hw/eos/eeko.c`) |
 | ROMs | `ROM1.BIN` 16 MiB = the firmware; `ROM0.BIN` is a bus pattern (no chip, not loaded, as upstream); `SFDATA.BIN` 8 MiB serial flash, see below |
 | ML platform | `platform/EOSM.202` in Penumbra (`stubs.S`: DryosDebugMsg `0x40D4`, current_task `0x3DE78`) |
 
@@ -65,16 +66,24 @@ work. The MPU replies were later replaced with the real camera's (below).
 | Q (quick control: AF method, drive, quality, WB, ...) and back | `quick`, `quick_close` |
 | INFO: shooting-settings screen with the camera's own settings from its MPU replies (Tv 1/125, ISO 100, RAW+L, 3:2), then LiveView with the info bars (390 shots, as the camera reports) | `info`, `info_lv` |
 | Half-shutter: `IDLEHandler PRESS_SW1_BUTTON` / `UNPRESS_SW1_BUTTON`, metering timer | smoke test `--min-count` |
+| LiveView start with the camera's `PROP_LV_LENS` block: Eeko started (`0xC022320C` reads 7), LiveView white balance and colour messages answered, LCD on (muted), no Canon `ASSERT` | smoke test `--min-count "[EEKO] ..."`, `--max-count ASSERT=0`; `gui` |
 | SD card mounted, file numbering from the camera's settings (100_6561) | log |
 | `-d debugmsg` with DryosDebugMsg `0x40D4` (RAM copy, as in ML's stubs) | `bench.py --cam EOSM --debugmsg` |
 
 Not working / not checked:
 - **LiveView image.** The EOS M boots into LiveView. Canon starts the LiveView pipeline (`evfActive`, sensor
-  power-on, ADTG/CMOS writes) but no frames come back, so the display stays muted until another screen
-  (menu, play) turns it on; the LiveView screen then shows Canon's overlays (grid, AF frame) over grey. The
-  boot screen is therefore not a GUI sign: `bench.json` sets `gui_uart` and has no `gui` hash. Needs the
-  LiveView work of `docs/PLAN.md` (frame injection into the YUV buffers `0x46000080` / `0x463CC080`
-  reported by `Evf`, plus the VD/EDMAC events Canon waits for).
+  power-on, ADTG/CMOS writes) and, once LiveView white balance has started on Eeko, turns the LCD on with the
+  image layer muted (`TurnOnDisplaywithMute`, `MuteON`): the screen shows Canon's overlays (grid, AF frame,
+  info bars) over grey, from boot on. No sensor frames come back, so Canon never unmutes it (frame injection,
+  below, fills the buffers but they are not on screen). `bench.json` waits for `gui_uart` first, then checks
+  the `gui` hash. Needs the LiveView work of `docs/PLAN.md` (the VD/EDMAC events Canon waits for).
+- Canon's display log (`[Post]%s %s(%s)(%d) %s`, `0xFF12F4DC`) names the display state from a 4-entry table
+  (`OFF`, `ON`, `S_ON`, `S_OFF`) and reads past it in the muted-on state: the pointer it takes from the
+  following stack bytes (`0x75626500`) is outside RAM. The camera reads something there and goes on; the
+  emulator stopped (`MEMTX invalid read`, `io_readx: Assertion`). `EOS_QUIRK_RAM_GAP_READ0` maps the
+  unpopulated space after the RAM and after its uncached alias (`0x10000000..0x3FFFFFFF`,
+  `0x50000000..0x7FFFFFFF`) as reads-0 / writes-ignored, reported once
+  (`[EOS] read from unpopulated RAM space`).
 - Overlay bars in LiveView with INFO are drawn magenta: palette entries with partial opacity are shown
   opaque. Cosmetic, same as other DIGIC 5 models upstream.
 - Full shutter, capture and pictures on the card: not looked at (see "Capture" below).
@@ -96,9 +105,10 @@ power-save counter at RAM `0x3EE5C` (`EnablePowerSave` `0xFF137E48` calls `PM_Ex
 | 2, LCLK (`0xC0400008` bit 1) set, `0xC0F01004` == 0x400 | counter 0 | low-clock WFI bracketed by `0xC0400030/44/48/134` writes |
 | 2, more than 500 ticks since the last stamp | counter 0 | `[PM] pmSelfRefresh : In`, pre hook, selfRefresh (`+0x14` = `0xFF0CEDCC`, logs `PM : IN`/`PM : OUT`, clears `0xC0400288/290/294` and `0xC04000B4` bit 2, then works on `0xC0201300`), post hook, `Out` |
 
-**Deep sleep is not reached in normal use**, so there is no `pm.c` yet: the counter stays at 1 in LiveView
-(one holder remains after start-up), at 2 in PLAY and the menus (DisplayMgr holds one more while the LCD is
-on), and the EOS M has no display-off state short of auto power off. Measured: after 75 s in PLAY the mode
+**Deep sleep is not reached in normal use**, so there is no `pm.c` yet: the counter is 2 in LiveView, PLAY
+and the menus (CtrlSrv, and DisplayMgr while the LCD is on; LiveView reached 2 only once the LCD came on
+with the Eeko model, before it stayed at 1), as on the camera, and the EOS M has no display-off state short
+of auto power off. Measured: after 75 s in PLAY the mode
 is still 1 and the counter 2; idle in LiveView already sleeps in the mode 1 WFI (smoke test: 0.76 MIPS,
 106 IRQ/s, 103 WFI/s, busy ratio 0.05). A `pm.c` like the 4000D's (clock gate from `CLOCK_ENABLE` = 0 to
 its next write, log of each sleep) becomes useful once something drives the counter to 0, e.g. ML turning
@@ -106,6 +116,26 @@ LiveView and the display off; the selfRefresh routine above (and whether it poll
 `0xC0201300` like the 1100D's `0xC0201308`) is where to start.
 
 ## Capture (not done)
+
+Tried with a capture profile (data below) on top of `capture.c`, not committed: the full press reaches
+`RlsOn`, `RlsSt`, `CapRsc go` and stops in `LockEngineResources` (`0xFF233750`): the capture needs engine
+resource `0x50000`, which Evf holds for LiveView ("STARTUP" lock, released by `0x0001486C` at the end of
+`evfStandby` / `SDRV_StanbyDevice`). Evf's standby waits in the LiveView timing-generator driver
+(`SetLvTgNextState`, `0x3537C`, `Device/TG/LvTgDriver.c`) for a semaphore the sensor's frame timing gives,
+which nothing emulates yet. So the still path stops before any Eeko message; the LiveView frame events are
+the next step, not Eeko. Eeko's resource (`0x350000`, held while it runs) is not in the capture's lock list.
+
+Capture parameters found in the ROM, for the profile: release line `0xC0220060` bit 1 (helpers in RAM
+`0x29484`/`0x294B4` set it, `0x294CC` clears it, only when the pin mode bits [3:2] read 01, so the register
+must read back with them set); set at `RlsSt` (`0xFF147588`), cleared when the exposure starts (`DmyRDone`
+`0xFF148C10`, `PCapRdyDn` `0xFF148F50`), **set again** at `CapEnd` (`0xFF1498D8`): the end of the readout is a
+rising edge, unlike the 1100D/4000D (`capture.c` needs an option for that). CAPREADY 0x51, HEAD1 0x6A,
+Fencing 0xC9/0xD0/0xD1. EventMgr (`0xFF0EF698`) copies `payload[0x34] + 0x35` bytes of
+`EVENTID_RELEASE_DATA_SW2ON` (`05 02`; add_size at 0x34, path at 0x35: non-zero = `EShutCapture`, 0 =
+`NormalCapture`) and `payload[0x28] + 0x29` of `EVENTID_AFTER_RELEASE_DATA` (`05 03`). JPEG encode path:
+core output on write connection 5, input on read connection 3, interrupt 0xA3 (`JpCore2IntrHandler`).
+Development then runs on Eeko (SS_PROC, `docs/models/eeko.md`): the answers are in the profile's `eeko.c`,
+derived from the firmware and not exercised yet.
 
 What a `capture.c` would need, as for the 1100D/4000D (`docs/models/capture.md`): the EOS M takes pictures
 from LiveView, so the release path differs from the DSLRs' mirror sequence. Needed: the MPU release events
@@ -144,18 +174,19 @@ whose bytes differ. Applied to `mpu_spells/EOSM.h`:
   entries for what the MPU never answers (`PROP_BATTERY_REPORT`, `PROP_TFT_STATUS 0`, `PROP_LV_AF_RESULT`,
   `09 24`, `PROP_LV_APERTURE`, `PROP_LV_BV`, the per-frame `03 3b` / `09 17` notifications, Complete WaitID
   0x80040004).
-- `PROP_LV_LENS` is answered on the camera with the 0x41-byte LV lens block, but that block starts AeWb's
-  LiveView main process, whose white balance runs on the **Eeko** core (`EekoApp/Color/WB/LV/LvWbAlgorWrap.c`):
-  with no Eeko model the wait times out, Canon asserts (line 611, `!IS_ERROR(semErr)`) and the GUI stops. The
-  spell has no reply until Eeko is modelled; the real reply is kept in a comment.
+- `PROP_LV_LENS` is answered with the camera's 0x41-byte LV lens block. That block starts AeWb's LiveView
+  main process, whose white balance runs on the **Eeko** core (`EekoApp/Color/WB/LV/LvWbAlgorWrap.c`): without
+  an answer from Eeko the wait times out, Canon asserts (line 611, `!IS_ERROR(semErr)`) and the GUI stops
+  (`QEMU_EOS_EEKO=0` shows it). The Eeko model (`docs/models/eeko.md`) answers it.
 - Still unanswered (rare, nothing visible breaks): `PROP_BURST_COUNT 02`, `PROP_AVAIL_SHOT` with the real
   count, `PROP_VIDEO_MODE`, and in LiveView with AF `PROP 8005002A` with non-zero values.
 
-In the emulator Canon wakes Eeko at LiveView start (`Gmt: Wakeup Eeko`, `[ENAV] WakeUpEekoAsyc:Start(1, 0)`).
-The camera's boot log (first 6.6 s) does not show that call, but its Eeko clock/reset register `0xC022320C`
-read 7 (running) in every captured state: LiveView, menu, playback. The upstream `C022320C = 7` -> interrupt
-0x111 shortcut answers the start handshake; Eeko jobs (LiveView white balance, still development) get no
-answer.
+In the emulator Canon wakes Eeko at LiveView start (`Gmt: Wakeup Eeko`, `[ENAV] WakeUpEekoAsyc:Start(1, 0)`)
+and keeps it running (it is not stopped for MENU or PLAY). The camera's boot log (first 6.6 s) does not show
+that call, but its Eeko clock/reset register `0xC022320C` read 7 (running) in every captured state: LiveView,
+menu, playback; the emulator now reads 7 there too. LiveView start sends DSLR_COLOR_PROC `0x302`, `0x304`,
+`0x800`, `0x004`, `0x900`, `0xB00`, `0x003` (white balance, colour calculation, lens corrections), all
+answered; the smoke test checks `0x302`.
 
 ## LiveView frames
 
